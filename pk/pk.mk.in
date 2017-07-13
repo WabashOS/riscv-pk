@@ -11,6 +11,7 @@ pk_hdrs = \
 	mmap.h \
 	pk.h \
 	syscall.h \
+	rpfh.h \
 
 pk_c_srcs = \
 	file.c \
@@ -20,6 +21,7 @@ pk_c_srcs = \
 	elf.c \
 	console.c \
 	mmap.c \
+	rpfh.c \
 
 pk_asm_srcs = \
 	entry.S \

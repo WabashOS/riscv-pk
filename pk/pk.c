@@ -4,154 +4,133 @@
 #include "elf.h"
 #include "mtrap.h"
 #include "frontend.h"
+#include "vm.h"
+#include "atomic.h"
+#include "rpfh.h"
 #include <stdbool.h>
 
 elf_info current;
 
-static void handle_option(const char* s)
-{
-  switch (s[1])
-  {
-    case 's': // print cycle count upon termination
-      current.cycle0 = 1;
-      break;
+// check everything works with one free page, one evicted page, one fetched page
+void test_full_onepage() {
+  // publish freepage available for rpfh
+  void *freepage1 = (void *) page_alloc();
+  uint64_t freepage1pte = *(walk((uint64_t) freepage1));
+  rpfh_publish_newpage(freepage1);
 
-    case 'p': // disable demand paging
-      demand_paging = 0;
-      break;
+  kassert(rpfh_read_reg(freepage) == 1);
 
-    default:
-      panic("unrecognized option: `%c'", s[1]);
-      break;
-  }
+  // evict a page
+  void *page = (void *) page_alloc();
+  *((int *)page) = 100;
+  rpfh_evict_page(page);
+
+  while (rpfh_read_reg(evict) != 0) { }
+
+  // page is remote
+  kassert(((uint64_t) *(walk((uint64_t )page)) & (uint64_t) 1 << 48) >> 48 == 1);
+
+  // access the evicted page
+  int val = *((int *)page);
+  // contents are correct?
+  kassert(val == 100);
+  // freepage queue empty
+  kassert(rpfh_read_reg(freepage) == 0);
+
+  uint64_t *fetchedpteaddr = walk((uint64_t) page);
+  uint64_t fetchedpte = *fetchedpteaddr;
+  // make sure we are using freepage1's ppn to backup the fetched page
+  kassert(freepage1pte >> 10 == fetchedpte >> 10);
+
+  // check newpage entries, valid entry should be the fetched page's pte
+  kassert((rpfh_read_reg(newframe) & 0xFFFFFFFF) == (uint64_t) fetchedpteaddr);
+  kassert(rpfh_read_reg(newframe) == 0);
 }
 
-#define MAX_ARGS 64
-typedef union {
-  uint64_t buf[MAX_ARGS];
-  char* argv[MAX_ARGS];
-} arg_buf;
+// register a few freepages, check that the count is correct
+void test_full_onepage_freepages() {
+  void *freepage1 = (void *) page_alloc();
+  void *freepage2 = (void *) page_alloc();
+  void *freepage3 = (void *) page_alloc();
+  rpfh_publish_newpage(freepage1);
+  rpfh_publish_newpage(freepage2);
+  rpfh_publish_newpage(freepage3);
 
-static size_t parse_args(arg_buf* args)
-{
-  long r = frontend_syscall(SYS_getmainvars, va2pa(args), sizeof(*args), 0, 0, 0, 0, 0);
-  kassert(r == 0);
-  uint64_t* pk_argv = &args->buf[1];
-  // pk_argv[0] is the proxy kernel itself.  skip it and any flags.
-  size_t pk_argc = args->buf[0], arg = 1;
-  for ( ; arg < pk_argc && *(char*)(uintptr_t)pk_argv[arg] == '-'; arg++)
-    handle_option((const char*)(uintptr_t)pk_argv[arg]);
+  kassert(rpfh_read_reg(freepage) == 3);
 
-  for (size_t i = 0; arg + i < pk_argc; i++)
-    args->argv[i] = (char*)(uintptr_t)pk_argv[arg + i];
-  return pk_argc - arg;
+  // evict a page
+  void *page = (void *) page_alloc();
+  rpfh_evict_page(page);
+  while (rpfh_read_reg(evict) != 0) { }
+  volatile int val = *((int *)page); // cause the remote fault
+
+  kassert(rpfh_read_reg(freepage) == 2);
+  kassert((rpfh_read_reg(newframe) & 0xFFFFFFFF) == (uint64_t) walk((uint64_t) page));
+  kassert(rpfh_read_reg(newframe) == 0);
 }
 
-static void init_tf(trapframe_t* tf, long pc, long sp)
-{
-  memset(tf, 0, sizeof(*tf));
-  tf->status = (read_csr(sstatus) &~ SSTATUS_SPP &~ SSTATUS_SIE) | SSTATUS_SPIE;
-  tf->gpr[2] = sp;
-  tf->epc = pc;
+void test_full_onepage_evictpages() {
+  void *freepage1 = (void *) page_alloc();
+  void *freepage2 = (void *) page_alloc();
+  void *freepage3 = (void *) page_alloc();
+  rpfh_publish_newpage(freepage1);
+  rpfh_publish_newpage(freepage2);
+  rpfh_publish_newpage(freepage3);
+
+  kassert(rpfh_read_reg(freepage) == 3);
+
+  // evict 3 pages
+  void *page = (void *) page_alloc();
+  void *page1 = (void *) page_alloc();
+  void *page2 = (void *) page_alloc();
+  rpfh_evict_page(page);
+  rpfh_evict_page(page1);
+  rpfh_evict_page(page2);
+
+  // wait for evictions to be processed
+  while (rpfh_read_reg(evict) != 0) { }
+
+  // cause the remote faults
+  volatile int val = *((int *)page);
+  val = *((int *)page1);
+  val = *((int *)page2);
+
+  // freepage queue empty
+  kassert(rpfh_read_reg(freepage) == 0);
+  kassert((rpfh_read_reg(newframe) & 0xFFFFFFFF) == (uint64_t) walk((uint64_t) page));
+  kassert((rpfh_read_reg(newframe) & 0xFFFFFFFF) == (uint64_t) walk((uint64_t) page1));
+  kassert((rpfh_read_reg(newframe) & 0xFFFFFFFF) == (uint64_t) walk((uint64_t) page2));
+  kassert(rpfh_read_reg(newframe) == 0);
 }
 
-static void run_loaded_program(size_t argc, char** argv, uintptr_t kstack_top)
-{
-  // copy phdrs to user stack
-  size_t stack_top = current.stack_top - current.phdr_size;
-  memcpy((void*)stack_top, (void*)current.phdr, current.phdr_size);
-  current.phdr = stack_top;
+int main() {
+  printk("I'M ALIVE!\n");
+  rpfh_init();
 
-  // copy argv to user stack
-  for (size_t i = 0; i < argc; i++) {
-    size_t len = strlen((char*)(uintptr_t)argv[i])+1;
-    stack_top -= len;
-    memcpy((void*)stack_top, (void*)(uintptr_t)argv[i], len);
-    argv[i] = (void*)stack_top;
-  }
-
-  // copy envp to user stack
-  const char* envp[] = {
-    // environment goes here
-  };
-  size_t envc = sizeof(envp) / sizeof(envp[0]);
-  for (size_t i = 0; i < envc; i++) {
-    size_t len = strlen(envp[i]) + 1;
-    stack_top -= len;
-    memcpy((void*)stack_top, envp[i], len);
-    envp[i] = (void*)stack_top;
-  }
-
-  // align stack
-  stack_top &= -sizeof(void*);
-
-  struct {
-    long key;
-    long value;
-  } aux[] = {
-    {AT_ENTRY, current.entry},
-    {AT_PHNUM, current.phnum},
-    {AT_PHENT, current.phent},
-    {AT_PHDR, current.phdr},
-    {AT_PAGESZ, RISCV_PGSIZE},
-    {AT_SECURE, 0},
-    {AT_RANDOM, stack_top},
-    {AT_NULL, 0}
-  };
-
-  // place argc, argv, envp, auxp on stack
-  #define PUSH_ARG(type, value) do { \
-    *((type*)sp) = (type)value; \
-    sp += sizeof(type); \
-  } while (0)
-
-  #define STACK_INIT(type) do { \
-    unsigned naux = sizeof(aux)/sizeof(aux[0]); \
-    stack_top -= (1 + argc + 1 + envc + 1 + 2*naux) * sizeof(type); \
-    stack_top &= -16; \
-    long sp = stack_top; \
-    PUSH_ARG(type, argc); \
-    for (unsigned i = 0; i < argc; i++) \
-      PUSH_ARG(type, argv[i]); \
-    PUSH_ARG(type, 0); /* argv[argc] = NULL */ \
-    for (unsigned i = 0; i < envc; i++) \
-      PUSH_ARG(type, envp[i]); \
-    PUSH_ARG(type, 0); /* envp[envc] = NULL */ \
-    for (unsigned i = 0; i < naux; i++) { \
-      PUSH_ARG(type, aux[i].key); \
-      PUSH_ARG(type, aux[i].value); \
-    } \
-  } while (0)
-
-  STACK_INIT(uintptr_t);
-
-  if (current.cycle0) { // start timer if so requested
-    current.time0 = rdtime();
-    current.cycle0 = rdcycle();
-    current.instret0 = rdinstret();
-  }
-
-  trapframe_t tf;
-  init_tf(&tf, current.entry, stack_top);
-  __clear_cache(0, 0);
-  write_csr(sscratch, kstack_top);
-  start_user(&tf);
+  //test_full_onepage();
+  //test_full_onepage_freepages();
+  test_full_onepage_evictpages();
+  printk("tests passed\n");
+  return 0;
 }
 
 static void rest_of_boot_loader(uintptr_t kstack_top)
 {
-  arg_buf args;
-  size_t argc = parse_args(&args);
-  if (!argc)
-    panic("tell me what ELF to load!");
+  current.time0 = rdtime();
+  current.cycle0 = rdcycle();
+  current.instret0 = rdinstret();
 
-  // load program named by argv[0]
-  long phdrs[128];
-  current.phdr = (uintptr_t)phdrs;
-  current.phdr_size = sizeof(phdrs);
-  load_elf(args.argv[0], &current);
+  int ret = main();
 
-  run_loaded_program(argc, args.argv, kstack_top);
+  size_t dt = rdtime() - current.time0;
+  size_t dc = rdcycle() - current.cycle0;
+  size_t di = rdinstret() - current.instret0;
+
+  printk("%ld ticks\n", dt);
+  printk("%ld cycles\n", dc);
+  printk("%ld instructions\n", di);
+  printk("%d.%d%d CPI\n", dc/di, 10ULL*dc/di % 10, (100ULL*dc + di/2)/di % 10);
+  shutdown(ret);
 }
 
 void boot_loader(uintptr_t dtb)

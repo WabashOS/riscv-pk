@@ -31,9 +31,8 @@ int do_munmap(uintptr_t addr, size_t length);
 uintptr_t do_mremap(uintptr_t addr, size_t old_size, size_t new_size, int flags);
 uintptr_t do_mprotect(uintptr_t addr, size_t length, int prot);
 uintptr_t do_brk(uintptr_t addr);
-
-#define va2pa(va) ({ uintptr_t __va = (uintptr_t)(va); \
-  extern uintptr_t first_free_paddr; \
-  __va >= DRAM_BASE ? __va : __va + first_free_paddr; })
+uintptr_t page_alloc();
+pte_t* walk(uintptr_t vaddr);
+uintptr_t va2pa(const void *va);
 
 #endif

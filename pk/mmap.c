@@ -412,3 +412,17 @@ uintptr_t pk_vm_init()
   uintptr_t kernel_stack_top = __page_alloc() + RISCV_PGSIZE;
   return kernel_stack_top;
 }
+
+uintptr_t page_alloc() {
+  return __page_alloc();
+}
+
+pte_t* walk(uintptr_t vaddr) {
+  return __walk(vaddr);
+}
+
+inline uintptr_t va2pa(const void *va) {
+  uintptr_t ptr = (uintptr_t) va;
+  pte_t *pte = walk(ptr);
+  return ((*pte >> PTE_PPN_SHIFT) << RISCV_PGSHIFT) | (ptr & 0xFFF);
+}
