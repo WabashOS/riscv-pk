@@ -92,6 +92,9 @@ void handle_trap(trapframe_t* tf)
     [CAUSE_STORE_PAGE_FAULT] = handle_fault_store,
   };
 
+  printk("Trap: %d\n", tf->cause);
+  printk("array size: %d\n", ARRAY_SIZE(trap_handlers));
+  printk("handler: %p\n", trap_handlers[tf->cause]);
   kassert(tf->cause < ARRAY_SIZE(trap_handlers) && trap_handlers[tf->cause]);
 
   trap_handlers[tf->cause](tf);

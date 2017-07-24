@@ -8,110 +8,181 @@
 #include "atomic.h"
 #include "rpfh.h"
 #include <stdbool.h>
+#include <stdlib.h>
 
 elf_info current;
 
-// check everything works with one free page, one evicted page, one fetched page
-void test_full_onepage() {
-  // publish freepage available for rpfh
-  void *freepage1 = (void *) page_alloc();
-  uint64_t freepage1pte = *(walk((uint64_t) freepage1));
-  rpfh_publish_newpage(freepage1);
+/* Test one page. Evict, publish frame as free, then touch and check newpage */
+bool test_one()
+{
+  printk("test_one:\n");
+  void *page = (void*) page_alloc();
+  uintptr_t paddr = va2pa((void*)page);
+  *(uint8_t*)page = 17;
 
-  kassert(rpfh_read_reg(freepage) == 1);
-
-  // evict a page
-  void *page = (void *) page_alloc();
-  *((int *)page) = 100;
   rpfh_evict_page(page);
 
-  while (rpfh_read_reg(evict) != 0) { }
+  rpfh_publish_freeframe(paddr);
 
-  // page is remote
-  kassert(((uint64_t) *(walk((uint64_t )page)) & (uint64_t) 1 << 48) >> 48 == 1);
+  /* Force rmem fault */
+  *(uint8_t*)page = 42;
 
-  // access the evicted page
-  int val = *((int *)page);
-  // contents are correct?
-  kassert(val == 100);
-  // freepage queue empty
-  kassert(rpfh_read_reg(freepage) == 0);
+  void* newpage = rpfh_pop_newpage();
+  if(newpage != page) {
+    printk("Newpage (%p) doesn't match fetched page (%p)\n", newpage, page);
+    return false;
+  }
+ 
+  pte_t newpte = *walk((uintptr_t)newpage);
+  if((newpte & PTE_REM)) {
+    printk("PTE Still marked remote!\n");
+    return false;
+  }
 
-  uint64_t *fetchedpteaddr = walk((uint64_t) page);
-  uint64_t fetchedpte = *fetchedpteaddr;
-  // make sure we are using freepage1's ppn to backup the fetched page
-  kassert(freepage1pte >> 10 == fetchedpte >> 10);
+  if(*(uint8_t*)page != 42) {
+    if(*(uint8_t*)page == 17) {
+      printk("Page didn't get faulting write\n");
+      return false;
+    } else {
+      printk("Page has garbage\n");
+      return false;
+    }
+  }
 
-  // check newpage entries, valid entry should be the fetched page's pte
-  kassert((rpfh_read_reg(newframe) & 0xFFFFFFFF) == (uint64_t) fetchedpteaddr);
-  kassert(rpfh_read_reg(newframe) == 0);
+  printk("test_one success\n\n");
+  return true;
 }
 
-// register a few freepages, check that the count is correct
-void test_full_onepage_freepages() {
-  void *freepage1 = (void *) page_alloc();
-  void *freepage2 = (void *) page_alloc();
-  void *freepage3 = (void *) page_alloc();
-  rpfh_publish_newpage(freepage1);
-  rpfh_publish_newpage(freepage2);
-  rpfh_publish_newpage(freepage3);
+/* Test two pages. Evict both, publish both frames, touch in opposite order.
+ * This tests two things:
+ * 1. Can all the queues handle multiple things.
+ * 2. Is the remote data really being fetched (that's why we touch in reverse
+ *    order).
+ */
+bool test_two()
+{
+  printk("test_two:\n");
+  /* Pages */
+  void *p0 = (void*) page_alloc();
+  void *p1 = (void*) page_alloc();
 
-  kassert(rpfh_read_reg(freepage) == 3);
+  /* Frames */
+  uintptr_t f0 = va2pa((void*)p0);
+  uintptr_t f1 = va2pa((void*)p1);
 
-  // evict a page
-  void *page = (void *) page_alloc();
-  rpfh_evict_page(page);
-  while (rpfh_read_reg(evict) != 0) { }
-  volatile int val = *((int *)page); // cause the remote fault
+  /* Values */
+  uint8_t v0 = 17;
+  uint8_t v1 = 42;
+  *(uint8_t*)p0 = v0;
+  *(uint8_t*)p1 = v1;
 
-  kassert(rpfh_read_reg(freepage) == 2);
-  kassert((rpfh_read_reg(newframe) & 0xFFFFFFFF) == (uint64_t) walk((uint64_t) page));
-  kassert(rpfh_read_reg(newframe) == 0);
+  printk("Starting test:\n");
+  printk("(V0,V1): (%d,%d)\n", *(uint8_t*)p0, *(uint8_t*)p1);
+  printk("(P0,P1): (%p,%p)\n", p0, p1);
+  printk("(F0,F1): (%lx,%lx)\n", f0, f1);
+
+  rpfh_evict_page(p0);
+  rpfh_evict_page(p1);
+  rpfh_publish_freeframe(f0);
+  rpfh_publish_freeframe(f1);
+
+  /* Values */
+  uint8_t v0_after, v1_after;
+  
+  /* Fetch in reverse order of publishing.
+   * This should result in the vaddrs switching paddrs. */
+  v1_after = *(uint8_t*)p1;
+  v0_after = *(uint8_t*)p0;
+  
+  /* Check which frame the page was fetched into. We expect the pages to have
+   * swapped frames since we fetched in reverse order and freeq is a FIFO */
+  uintptr_t f0_after = va2pa((void*)p0);
+  uintptr_t f1_after = va2pa((void*)p1);
+  
+  if(f0_after != f1 || f1_after != f0 ||
+     v1_after != v1 || v0_after != v0) {
+    printk("Test Failed:\n");
+    printk("Expected:\n\n");
+    printk("(V0,V1): (%d,%d)\n", v0, v1);
+    printk("(P0,P1): (%p,%p)\n", p0, p1);
+    printk("(F0,F1): (%lx,%lx)\n", f1, f0);
+
+    printk("\nGot:\n");
+    printk("(V0,V1): (%d,%d)\n", v0_after, v1_after);
+    printk("(P0,P1): (%p,%p)\n", p0, p1);
+    printk("(F0,F1): (%lx,%lx)\n", f0_after, f1_after);
+
+    return false;
+  }
+
+  printk("test_two success:\n");
+  printk("(V0,V1): (%d,%d)\n", *(uint8_t*)p0, *(uint8_t*)p1);
+  printk("(P0,P1): (%p,%p)\n", p0, p1);
+  printk("(F0,F1): (0x%lx,0x%lx)\n", f0_after, f1_after);
+  
+  printk("\n");
+  return true;
 }
 
-void test_full_onepage_evictpages() {
-  void *freepage1 = (void *) page_alloc();
-  void *freepage2 = (void *) page_alloc();
-  void *freepage3 = (void *) page_alloc();
-  rpfh_publish_newpage(freepage1);
-  rpfh_publish_newpage(freepage2);
-  rpfh_publish_newpage(freepage3);
-
-  kassert(rpfh_read_reg(freepage) == 3);
-
-  // evict 3 pages
-  void *page = (void *) page_alloc();
-  void *page1 = (void *) page_alloc();
-  void *page2 = (void *) page_alloc();
-  rpfh_evict_page(page);
-  rpfh_evict_page(page1);
-  rpfh_evict_page(page2);
-
-  // wait for evictions to be processed
-  while (rpfh_read_reg(evict) != 0) { }
-
-  // cause the remote faults
-  volatile int val = *((int *)page);
-  val = *((int *)page1);
-  val = *((int *)page2);
-
-  // freepage queue empty
-  kassert(rpfh_read_reg(freepage) == 0);
-  kassert((rpfh_read_reg(newframe) & 0xFFFFFFFF) == (uint64_t) walk((uint64_t) page));
-  kassert((rpfh_read_reg(newframe) & 0xFFFFFFFF) == (uint64_t) walk((uint64_t) page1));
-  kassert((rpfh_read_reg(newframe) & 0xFFFFFFFF) == (uint64_t) walk((uint64_t) page2));
-  kassert(rpfh_read_reg(newframe) == 0);
+bool page_cmp(uint8_t *page, uint8_t val)
+{
+  for(int i = 0; i < 4096; i++) {
+    if(page[i] != val)
+      return false;
+  }
+  return true;
 }
 
-int main() {
-  printk("I'M ALIVE!\n");
+/* n must be <= 128 */
+bool test_n(int n)
+{
+  assert(n <= 512);
+  printk("test_%d\n", n);
+  void *pages[512];
+
+  /* Allocate, evict, and publish frames */
+  for(int i = 0; i < n; i++) {
+    pages[i] = (void*)page_alloc();
+    memset(pages[i], i, 4096);
+    uintptr_t paddr = va2pa(pages[i]);
+    rpfh_evict_page(pages[i]);
+    rpfh_publish_freeframe(paddr);
+  }
+
+  /* Access pages in reverse order to make sure each page ends up in a
+   * different physical frame */
+  for(int i = n - 1; i >= 0; i--) {
+    if(!page_cmp(pages[i], i)) {
+      printk("Unexpected value in page %d: %d\n", i, *(uint8_t*)pages[i]);
+      return false;
+    }
+  }
+
+  printk("test_%d Success!\n", n);
+  return true;
+}
+
+int main()
+{
   rpfh_init();
 
-  //test_full_onepage();
-  //test_full_onepage_freepages();
-  test_full_onepage_evictpages();
-  printk("tests passed\n");
-  return 0;
+  if(!test_one()) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
+  if(!test_two()) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
+  if(!test_n(512)) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
+  printk("Test Success!\n");
+  return EXIT_SUCCESS;
 }
 
 static void rest_of_boot_loader(uintptr_t kstack_top)
