@@ -14,6 +14,13 @@
 void rpfh_init();
 void rpfh_publish_freeframe(uintptr_t paddr);
 void rpfh_evict_page(void const *page);
+
+/* Returns vaddr of last evicted page or 0 if page still being evicted. 
+ * uintptr_t to discourage dereferencing. */
+uintptr_t rpfh_poll_evict();
+
+/* returns vaddr of most recently fetched page, or NULL if no page was fetched
+ * since the last call */
 void *rpfh_pop_newpage();
 
 

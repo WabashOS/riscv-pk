@@ -20,6 +20,12 @@ void rpfh_evict_page(void const *page)
   *PFA_EVICTPAGE = va2pa(page_pte);
 }
 
+uintptr_t rpfh_poll_evict()
+{
+  uintptr_t evicted = (uintptr_t)*PFA_EVICTPAGE;
+  return evicted;
+}
+
 void *rpfh_pop_newpage()
 {
   void *newpage = *PFA_NEWPAGE;

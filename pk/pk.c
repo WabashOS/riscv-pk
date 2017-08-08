@@ -12,22 +12,51 @@
 
 elf_info current;
 
+/* Max time to poll for completion for PFA stuff. Assume that the device is
+ * broken if you have to poll this many times. Currently very conservative. */
+#define MAX_POLL_ITER 1024*1024
+
 /* Test one page. Evict, publish frame as free, then touch and check newpage */
-bool test_one()
+bool test_one(bool flush)
 {
-  printk("test_one:\n");
-  void *page = (void*) page_alloc();
+  printk("test_one: %s\n", flush ? "Flush TLB" : "Don't Flush TLB");
+  /* Volatile to force multiple queries to memory */
+  volatile uint8_t *page = (volatile uint8_t*) page_alloc();
   uintptr_t paddr = va2pa((void*)page);
   *(uint8_t*)page = 17;
 
-  rpfh_evict_page(page);
+  rpfh_evict_page((void*)page);
+  if(flush) {
+    flush_tlb();
+  }
+
+  int poll_count = 0;
+  while(rpfh_poll_evict() == 0) {
+    if(poll_count++ == MAX_POLL_ITER) {
+      printk("Polling for eviction completion took too long\n");
+      return false;
+    }
+  }
+  if(flush) {
+    flush_tlb();
+  }
 
   rpfh_publish_freeframe(paddr);
+  if(flush) {
+    flush_tlb();
+  }
 
   /* Force rmem fault */
-  *(uint8_t*)page = 42;
+  *page = 42;
+  if(flush) {
+    flush_tlb();
+  }
 
   void* newpage = rpfh_pop_newpage();
+  if(flush) {
+    flush_tlb();
+  }
+
   if(newpage != page) {
     printk("Newpage (%p) doesn't match fetched page (%p)\n", newpage, page);
     return false;
@@ -39,8 +68,8 @@ bool test_one()
     return false;
   }
 
-  if(*(uint8_t*)page != 42) {
-    if(*(uint8_t*)page == 17) {
+  if(*page != 42) {
+    if(*page == 17) {
       printk("Page didn't get faulting write\n");
       return false;
     } else {
@@ -94,23 +123,31 @@ bool test_two()
   v1_after = *(uint8_t*)p1;
   v0_after = *(uint8_t*)p0;
   
+  /* Get newpage info */
+  void *n1 = rpfh_pop_newpage();
+  void *n0 = rpfh_pop_newpage();
+
   /* Check which frame the page was fetched into. We expect the pages to have
    * swapped frames since we fetched in reverse order and freeq is a FIFO */
   uintptr_t f0_after = va2pa((void*)p0);
   uintptr_t f1_after = va2pa((void*)p1);
   
   if(f0_after != f1 || f1_after != f0 ||
-     v1_after != v1 || v0_after != v0) {
+     v1_after != v1 || v0_after != v0 ||
+     p0 != n0       || p1 != n1)
+  {
     printk("Test Failed:\n");
     printk("Expected:\n\n");
     printk("(V0,V1): (%d,%d)\n", v0, v1);
     printk("(P0,P1): (%p,%p)\n", p0, p1);
-    printk("(F0,F1): (%lx,%lx)\n", f1, f0);
+    printk("(F0,F1): (0x%lx,0x%lx)\n", f1, f0);
+    printk("(N0,N1): (%p,%p)\n", p0, p1);
 
     printk("\nGot:\n");
     printk("(V0,V1): (%d,%d)\n", v0_after, v1_after);
     printk("(P0,P1): (%p,%p)\n", p0, p1);
-    printk("(F0,F1): (%lx,%lx)\n", f0_after, f1_after);
+    printk("(F0,F1): (0x%lx,0x%lx)\n", f0_after, f1_after);
+    printk("(N0,N1): (%p,%p)\n", n0, n1);
 
     return false;
   }
@@ -119,6 +156,7 @@ bool test_two()
   printk("(V0,V1): (%d,%d)\n", *(uint8_t*)p0, *(uint8_t*)p1);
   printk("(P0,P1): (%p,%p)\n", p0, p1);
   printk("(F0,F1): (0x%lx,0x%lx)\n", f0_after, f1_after);
+  printk("(N0,N1): (%p,%p)\n", n0, n1);
   
   printk("\n");
   return true;
@@ -152,8 +190,18 @@ bool test_n(int n)
   /* Access pages in reverse order to make sure each page ends up in a
    * different physical frame */
   for(int i = n - 1; i >= 0; i--) {
+
     if(!page_cmp(pages[i], i)) {
       printk("Unexpected value in page %d: %d\n", i, *(uint8_t*)pages[i]);
+      return false;
+    }
+  }
+
+  /* Drain newpage queue sepparately to stress it out a bit */
+  for(int i = n - 1; i >= 0; i--) {
+    void* newpage = rpfh_pop_newpage();
+    if(newpage != pages[i]) {
+      printk("Newpage (%p) doesn't match fetched page (%p)\n", newpage, pages[i]);
       return false;
     }
   }
@@ -166,7 +214,12 @@ int main()
 {
   rpfh_init();
 
-  if(!test_one()) {
+  if(!test_one(false)) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
+  if(!test_one(true)) {
     printk("Test Failure!\n");
     return EXIT_FAILURE;
   }
@@ -176,7 +229,7 @@ int main()
     return EXIT_FAILURE;
   }
 
-  if(!test_n(512)) {
+  if(!test_n(16)) {
     printk("Test Failure!\n");
     return EXIT_FAILURE;
   }
