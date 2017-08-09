@@ -4,6 +4,7 @@
 #include "boot.h"
 #include "bits.h"
 #include "mtrap.h"
+#include "rpfh.h"
 #include <stdint.h>
 #include <errno.h>
 
@@ -127,6 +128,7 @@ static uintptr_t __vm_alloc(size_t npage)
   uintptr_t start = current.brk, end = current.mmap_max - npage*RISCV_PGSIZE;
   for (uintptr_t a = start; a <= end; a += RISCV_PGSIZE)
   {
+    printk("trying page %lx\n", a);
     if (!__va_avail(a))
       continue;
     uintptr_t first = a, last = a + (npage-1) * RISCV_PGSIZE;
@@ -136,6 +138,7 @@ static uintptr_t __vm_alloc(size_t npage)
       continue;
     return a;
   }
+  printk("couldn't find suitable page\n");
   return 0;
 }
 
@@ -163,6 +166,22 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
   vaddr = vpn << RISCV_PGSHIFT;
 
   pte_t* pte = __walk(vaddr);
+
+  /* Check for remote pages, signifies the PFA requested help */
+  if (pte && *pte & PTE_REM) {
+    /* Fill the free frame queue */
+    int end = MIN(__testn_n, __testn_i + rpfh_check_freeframes());
+    for(; __testn_i < end; __testn_i++) {
+      uintptr_t paddr = va2pa(__testn_pages[__testn_i]);
+      rpfh_publish_freeframe(paddr);
+    }
+
+    /* Drain newpage queue (right now we don't validate the output)*/
+    void *newpage;
+    while( (newpage = rpfh_pop_newpage()) != 0 ) {}
+    
+    return 0;
+  }
 
   if (pte == 0 || *pte == 0 || !__valid_user_range(vaddr, 1))
     return -1;
@@ -227,12 +246,16 @@ uintptr_t __do_mmap(uintptr_t addr, size_t length, int prot, int flags, file_t* 
     if ((addr & (RISCV_PGSIZE-1)) || !__valid_user_range(addr, length))
       return (uintptr_t)-1;
   }
-  else if ((addr = __vm_alloc(npage)) == 0)
+  else if ((addr = __vm_alloc(npage)) == 0) {
+    printk("bad __vm_alloc: npage = %ld\n", npage);
     return (uintptr_t)-1;
+  }
 
   vmr_t* v = __vmr_alloc(addr, length, f, offset, npage, prot);
-  if (!v)
+  if (!v) {
+    printk("bad __vmr_alloc\n");
     return (uintptr_t)-1;
+  }
 
   for (uintptr_t a = addr; a < addr + length; a += RISCV_PGSIZE)
   {

@@ -10,6 +10,11 @@
 #include <string.h>
 #include <stdarg.h>
 
+/* For PFA tests */
+extern void **__testn_pages;
+extern int __testn_n;
+extern int __testn_i;
+
 typedef struct
 {
   long gpr[32];

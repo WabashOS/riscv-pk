@@ -171,15 +171,14 @@ bool page_cmp(uint8_t *page, uint8_t val)
   return true;
 }
 
-/* n must be <= 128 */
-bool test_n(int n)
+/* Test as much as we can at once (fill all queues) */
+bool test_max(void)
 {
-  assert(n <= 512);
-  printk("test_%d\n", n);
-  void *pages[512];
+  printk("test_max\n");
+  void *pages[PFA_FREE_MAX];
 
   /* Allocate, evict, and publish frames */
-  for(int i = 0; i < n; i++) {
+  for(int i = 0; i < PFA_FREE_MAX; i++) {
     pages[i] = (void*)page_alloc();
     memset(pages[i], i, 4096);
     uintptr_t paddr = va2pa(pages[i]);
@@ -189,7 +188,7 @@ bool test_n(int n)
 
   /* Access pages in reverse order to make sure each page ends up in a
    * different physical frame */
-  for(int i = n - 1; i >= 0; i--) {
+  for(int i = PFA_FREE_MAX - 1; i >= 0; i--) {
 
     if(!page_cmp(pages[i], i)) {
       printk("Unexpected value in page %d: %d\n", i, *(uint8_t*)pages[i]);
@@ -198,7 +197,7 @@ bool test_n(int n)
   }
 
   /* Drain newpage queue sepparately to stress it out a bit */
-  for(int i = n - 1; i >= 0; i--) {
+  for(int i = PFA_FREE_MAX - 1; i >= 0; i--) {
     void* newpage = rpfh_pop_newpage();
     if(newpage != pages[i]) {
       printk("Newpage (%p) doesn't match fetched page (%p)\n", newpage, pages[i]);
@@ -206,7 +205,47 @@ bool test_n(int n)
     }
   }
 
-  printk("test_%d Success!\n", n);
+  printk("test_max Success!\n");
+  return true;
+}
+
+/* Schenaningans due to PK's lack of a useful malloc */
+void **__testn_pages;
+int  __testn_n;
+int  __testn_i;
+#define test_n(N)  ({         \
+  void *__testn_stat_pages[N];     \
+  __testn_pages = __testn_stat_pages; \
+  __testn_n = N;          \
+  __testn_i = 0;          \
+  __test_n(__testn_pages, N); \
+    })
+bool __test_n(void **pages, int n)
+{
+  printk("Test_%d\n", n);
+  /* Allocate and evict batch of pages
+   * Don't publish frames though, let page fault handler do that */
+  for(int i = 0; i < n; i++) {
+    pages[i] = (void*)page_alloc();
+    memset(pages[i], i, 4096);
+    rpfh_evict_page(pages[i]);
+  }
+
+  /* Start touching! */
+  for(int i = n - 1; i >= 0; i--) {
+    if(!page_cmp(pages[i], i)) {
+      printk("Unexpected value in page %d: %d\n", i, *(uint8_t*)pages[i]);
+      return false;
+    }
+  }
+
+  /* Finish draining the new page queue in case the page fault handler didn't
+   * grab all of them (so we leave the PFA in a good state for subsequent 
+   * tests*/
+  void *newpage;
+  while( (newpage = rpfh_pop_newpage()) ) {}
+
+  printk("Test_%d Success\n", n);
   return true;
 }
 
@@ -229,7 +268,12 @@ int main()
     return EXIT_FAILURE;
   }
 
-  if(!test_n(16)) {
+  if(!test_max()) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
+  if(!test_n(256)) {
     printk("Test Failure!\n");
     return EXIT_FAILURE;
   }

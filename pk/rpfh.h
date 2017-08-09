@@ -8,10 +8,18 @@
 
 #define PFA_BASE           0x2000
 #define PFA_FREEFRAME      ((volatile uintptr_t*)(PFA_BASE))
-#define PFA_EVICTPAGE      ((volatile uintptr_t*)(PFA_BASE + 8))
-#define PFA_NEWPAGE        ((void** volatile)(PFA_BASE + 16))
+#define PFA_FREESTAT       ((volatile uintptr_t*)(PFA_BASE + 8))
+#define PFA_EVICTPAGE      ((volatile uintptr_t*)(PFA_BASE + 16))
+#define PFA_EVICTSTAT      ((volatile uintptr_t*)(PFA_BASE + 24))
+#define PFA_NEWPAGE        ((void** volatile)(PFA_BASE + 32))
+
+/* PFA Limits (implementation-specific) */
+#define PFA_FREE_MAX 64
+#define PFA_NEW_MAX  64
+#define PFA_EVICT_MAX 1
 
 void rpfh_init();
+uint64_t rpfh_check_freeframes(void);
 void rpfh_publish_freeframe(uintptr_t paddr);
 void rpfh_evict_page(void const *page);
 
