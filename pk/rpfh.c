@@ -19,10 +19,12 @@ void rpfh_publish_freeframe(uintptr_t paddr)
 
 void rpfh_evict_page(void const *page)
 {
-  pte_t *page_pte = walk((uintptr_t) page);
-  
   *PFA_EVICTPAGE = (uintptr_t)page;
-  *PFA_EVICTPAGE = va2pa(page_pte);
+  *PFA_EVICTPAGE = va2pa(page);
+  
+  pte_t *page_pte = walk((uintptr_t) page);
+  *page_pte |= PTE_REM;
+  flush_tlb();
 }
 
 uintptr_t rpfh_poll_evict()
