@@ -74,6 +74,11 @@ static void handle_interrupt(trapframe_t* tf)
   clear_csr(sip, SIP_SSIP);
 }
 
+static void handle_access_fault(trapframe_t* tf)
+{
+  panic("Memory Access Fault");
+}
+
 void handle_trap(trapframe_t* tf)
 {
   if ((intptr_t)tf->cause < 0)
@@ -85,6 +90,8 @@ void handle_trap(trapframe_t* tf)
     [CAUSE_MISALIGNED_FETCH] = handle_misaligned_fetch,
     [CAUSE_FETCH_PAGE_FAULT] = handle_fault_fetch,
     [CAUSE_ILLEGAL_INSTRUCTION] = handle_illegal_instruction,
+    /* [CAUSE_LOAD_ACCESS] = handle_access_fault, */
+    /* [CAUSE_STORE_ACCESS] = handle_access_fault, */
     [CAUSE_USER_ECALL] = handle_syscall,
     [CAUSE_BREAKPOINT] = handle_breakpoint,
     [CAUSE_MISALIGNED_STORE] = handle_misaligned_store,

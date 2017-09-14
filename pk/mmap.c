@@ -4,7 +4,7 @@
 #include "boot.h"
 #include "bits.h"
 #include "mtrap.h"
-#include "rpfh.h"
+#include "pfa.h"
 #include <stdint.h>
 #include <errno.h>
 
@@ -167,19 +167,47 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
 
   pte_t* pte = __walk(vaddr);
 
+  /* Check for test_inval's special page */
+  if (vaddr == test_inval_vaddr) {
+    printk("Saw page fault on test_inval special addr\n");
+    test_inval_touched = true;
+    *pte |= PTE_V;
+    flush_tlb();
+    return 0;
+  }
+
   /* Check for remote pages, signifies the PFA requested help */
-  if (pte && *pte & PTE_REM) {
+  if (pte && pte_is_remote(*pte)) {
+
     /* Fill the free frame queue */
-    int end = MIN(__testn_n, __testn_i + rpfh_check_freeframes());
+    int end = MIN(__testn_n, __testn_i + pfa_check_freeframes());
     for(; __testn_i < end; __testn_i++) {
-      uintptr_t paddr = va2pa(__testn_pages[__testn_i]);
-      rpfh_publish_freeframe(paddr);
+      pfa_publish_freeframe(__testn_paddrs[__testn_i]);
     }
 
     /* Drain newpage queue (right now we don't validate the output)*/
     void *newpage;
-    while( (newpage = rpfh_pop_newpage()) != 0 ) {}
+    uint64_t nnew = pfa_check_newpage();
+    if(nnew > PFA_NEW_MAX) {
+      printk("Unreasonable number of new pages reported: %ld\n", nnew);
+      return -1;
+    }
+
+    while(nnew) {
+      newpage = pfa_pop_newpage();
+      if(newpage == 0) {
+        printk("Hit end of newpage queue (wrong number from NEW_STAT?)\n");
+        return -1;
+      }
+      nnew--;
+    }
     
+    nnew = pfa_check_newpage();
+    if(nnew != 0) {
+      printk("NEW_STAT reporting %ld pages even though we drained it!\n", nnew);
+      return -1;
+    }
+
     return 0;
   }
 

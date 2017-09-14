@@ -6,7 +6,7 @@
 #include "frontend.h"
 #include "vm.h"
 #include "atomic.h"
-#include "rpfh.h"
+#include "pfa.h"
 #include <stdbool.h>
 #include <stdlib.h>
 
@@ -16,6 +16,37 @@ elf_info current;
  * broken if you have to poll this many times. Currently very conservative. */
 #define MAX_POLL_ITER 1024*1024
 
+/* Test fetch of an invalid page (should cause page fault) */
+uintptr_t test_inval_vaddr = -1;
+bool test_inval_touched = false;
+bool test_inval(void)
+{
+  printk("test_inval\n");
+
+  uint8_t *page = (uint8_t*) page_alloc();
+  uintptr_t paddr = va2pa((void*)page);
+  pte_t *ptep = walk((uintptr_t)page);
+
+  /* Mark page invalid */
+  *ptep &= ~(PTE_V);
+  flush_tlb();
+
+  pfa_evict_page((void*)page);
+  pfa_publish_freeframe(paddr);
+  
+  /* Touch it, should cause page fault */
+  test_inval_vaddr = (uintptr_t)page;
+  *page = 17;
+
+  if(!test_inval_touched) {
+    printk("Didn't receive page fault on invalid page\n");
+    return false;
+  }
+
+  printk("test_inval success\n");
+  return true;
+}
+
 /* Test one page. Evict, publish frame as free, then touch and check newpage */
 bool test_one(bool flush)
 {
@@ -23,15 +54,16 @@ bool test_one(bool flush)
   /* Volatile to force multiple queries to memory */
   volatile uint8_t *page = (volatile uint8_t*) page_alloc();
   uintptr_t paddr = va2pa((void*)page);
-  *(uint8_t*)page = 17;
+  /* we use index 10 to make sure the PFA works even with unaligned accesses */
+  page[10] = 17;
 
-  rpfh_evict_page((void*)page);
+  pfa_evict_page((void*)page);
   if(flush) {
     flush_tlb();
   }
 
   int poll_count = 0;
-  while(rpfh_poll_evict() == 0) {
+  while(pfa_poll_evict() == 0) {
     if(poll_count++ == MAX_POLL_ITER) {
       printk("Polling for eviction completion took too long\n");
       return false;
@@ -41,18 +73,24 @@ bool test_one(bool flush)
     flush_tlb();
   }
 
-  rpfh_publish_freeframe(paddr);
+  pfa_publish_freeframe(paddr);
   if(flush) {
     flush_tlb();
   }
 
   /* Force rmem fault */
-  *page = 42;
+  page[10] = 42;
   if(flush) {
     flush_tlb();
   }
 
-  void* newpage = rpfh_pop_newpage();
+  uint64_t nnew = pfa_check_newpage();
+  if(nnew != 1) {
+    printk("New page queue reporting wrong number of new pages: %ld\n", nnew);
+    return false;
+  }
+
+  void* newpage = pfa_pop_newpage();
   if(flush) {
     flush_tlb();
   }
@@ -63,13 +101,13 @@ bool test_one(bool flush)
   }
  
   pte_t newpte = *walk((uintptr_t)newpage);
-  if((newpte & PTE_REM)) {
+  if(pte_is_remote(newpte)) {
     printk("PTE Still marked remote!\n");
     return false;
   }
 
-  if(*page != 42) {
-    if(*page == 17) {
+  if(page[10] != 42) {
+    if(page[10] == 17) {
       printk("Page didn't get faulting write\n");
       return false;
     } else {
@@ -110,10 +148,10 @@ bool test_two()
   printk("(P0,P1): (%p,%p)\n", p0, p1);
   printk("(F0,F1): (%lx,%lx)\n", f0, f1);
 
-  rpfh_evict_page(p0);
-  rpfh_evict_page(p1);
-  rpfh_publish_freeframe(f0);
-  rpfh_publish_freeframe(f1);
+  pfa_evict_page(p0);
+  pfa_evict_page(p1);
+  pfa_publish_freeframe(f0);
+  pfa_publish_freeframe(f1);
 
   /* Values */
   uint8_t v0_after, v1_after;
@@ -124,8 +162,8 @@ bool test_two()
   v0_after = *(uint8_t*)p0;
   
   /* Get newpage info */
-  void *n1 = rpfh_pop_newpage();
-  void *n0 = rpfh_pop_newpage();
+  void *n1 = pfa_pop_newpage();
+  void *n0 = pfa_pop_newpage();
 
   /* Check which frame the page was fetched into. We expect the pages to have
    * swapped frames since we fetched in reverse order and freeq is a FIFO */
@@ -182,8 +220,8 @@ bool test_max(void)
     pages[i] = (void*)page_alloc();
     memset(pages[i], i, 4096);
     uintptr_t paddr = va2pa(pages[i]);
-    rpfh_evict_page(pages[i]);
-    rpfh_publish_freeframe(paddr);
+    pfa_evict_page(pages[i]);
+    pfa_publish_freeframe(paddr);
   }
 
   /* Access pages in reverse order to make sure each page ends up in a
@@ -198,7 +236,7 @@ bool test_max(void)
 
   /* Drain newpage queue sepparately to stress it out a bit */
   for(int i = PFA_FREE_MAX - 1; i >= 0; i--) {
-    void* newpage = rpfh_pop_newpage();
+    void* newpage = pfa_pop_newpage();
     if(newpage != pages[i]) {
       printk("Newpage (%p) doesn't match fetched page (%p)\n", newpage, pages[i]);
       return false;
@@ -211,24 +249,28 @@ bool test_max(void)
 
 /* Schenaningans due to PK's lack of a useful malloc */
 void **__testn_pages;
+uintptr_t *__testn_paddrs;
 int  __testn_n;
 int  __testn_i;
-#define test_n(N)  ({         \
-  void *__testn_stat_pages[N];     \
-  __testn_pages = __testn_stat_pages; \
-  __testn_n = N;          \
-  __testn_i = 0;          \
-  __test_n(__testn_pages, N); \
+#define test_n(N)  ({                         \
+  void *__testn_stat_pages[N];                \
+  uintptr_t __testn_stat_paddrs[N];           \
+  __testn_pages = __testn_stat_pages;         \
+  __testn_paddrs = __testn_stat_paddrs;       \
+  __testn_n = N;                              \
+  __testn_i = 0;                              \
+  __test_n(__testn_pages, __testn_paddrs, N); \
     })
-bool __test_n(void **pages, int n)
+bool __test_n(void **pages, uintptr_t *paddrs, int n)
 {
   printk("Test_%d\n", n);
   /* Allocate and evict batch of pages
    * Don't publish frames though, let page fault handler do that */
   for(int i = 0; i < n; i++) {
     pages[i] = (void*)page_alloc();
+    paddrs[i] = va2pa(pages[i]);
     memset(pages[i], i, 4096);
-    rpfh_evict_page(pages[i]);
+    pfa_evict_page(pages[i]);
   }
 
   /* Start touching! */
@@ -243,7 +285,7 @@ bool __test_n(void **pages, int n)
    * grab all of them (so we leave the PFA in a good state for subsequent 
    * tests*/
   void *newpage;
-  while( (newpage = rpfh_pop_newpage()) ) {}
+  while( (newpage = pfa_pop_newpage()) ) {}
 
   printk("Test_%d Success\n", n);
   return true;
@@ -251,7 +293,7 @@ bool __test_n(void **pages, int n)
 
 int main()
 {
-  rpfh_init();
+  pfa_init();
 
   if(!test_one(false)) {
     printk("Test Failure!\n");
@@ -275,6 +317,11 @@ int main()
 
   if(!test_n(256)) {
     printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
+  if(!test_inval()) {
+    printk("Test Failure\n");
     return EXIT_FAILURE;
   }
 
