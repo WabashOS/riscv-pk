@@ -180,9 +180,12 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
   if (pte && pte_is_remote(*pte)) {
 
     /* Fill the free frame queue */
-    int end = MIN(__testn_n, __testn_i + pfa_check_freeframes());
-    for(; __testn_i < end; __testn_i++) {
-      pfa_publish_freeframe(__testn_paddrs[__testn_i]);
+    uint64_t nfree_needed = pfa_check_freeframes();
+    while(nfree_needed) {
+      void *pg = (void*)page_alloc();
+      /* We'll never get this vaddr back */
+      pfa_publish_freeframe(va2pa(pg));
+      nfree_needed--;
     }
 
     /* Drain newpage queue (right now we don't validate the output)*/
@@ -461,6 +464,7 @@ uintptr_t pk_vm_init()
   write_csr(sptbr, ((uintptr_t)root_page_table >> RISCV_PGSHIFT) | SPTBR_MODE_CHOICE);
 
   uintptr_t kernel_stack_top = __page_alloc() + RISCV_PGSIZE;
+  printk("%ld\n", mem_pages);
   return kernel_stack_top;
 }
 

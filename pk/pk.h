@@ -15,11 +15,6 @@
 extern uintptr_t test_inval_vaddr;
 extern bool test_inval_touched;
 
-extern void **__testn_pages;
-extern uintptr_t *__testn_paddrs;
-extern int __testn_n;
-extern int __testn_i;
-
 typedef struct
 {
   long gpr[32];

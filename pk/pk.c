@@ -6,6 +6,7 @@
 #include "frontend.h"
 #include "vm.h"
 #include "atomic.h"
+#include "bits.h"
 #include "pfa.h"
 #include <stdbool.h>
 #include <stdlib.h>
@@ -15,37 +16,6 @@ elf_info current;
 /* Max time to poll for completion for PFA stuff. Assume that the device is
  * broken if you have to poll this many times. Currently very conservative. */
 #define MAX_POLL_ITER 1024*1024
-
-/* Test fetch of an invalid page (should cause page fault) */
-uintptr_t test_inval_vaddr = -1;
-bool test_inval_touched = false;
-bool test_inval(void)
-{
-  printk("test_inval\n");
-
-  uint8_t *page = (uint8_t*) page_alloc();
-  uintptr_t paddr = va2pa((void*)page);
-  pte_t *ptep = walk((uintptr_t)page);
-
-  /* Mark page invalid */
-  *ptep &= ~(PTE_V);
-  flush_tlb();
-
-  pfa_evict_page((void*)page);
-  pfa_publish_freeframe(paddr);
-  
-  /* Touch it, should cause page fault */
-  test_inval_vaddr = (uintptr_t)page;
-  *page = 17;
-
-  if(!test_inval_touched) {
-    printk("Didn't receive page fault on invalid page\n");
-    return false;
-  }
-
-  printk("test_inval success\n");
-  return true;
-}
 
 /* Test one page. Evict, publish frame as free, then touch and check newpage */
 bool test_one(bool flush)
@@ -202,7 +172,7 @@ bool test_two()
 
 bool page_cmp(uint8_t *page, uint8_t val)
 {
-  for(int i = 0; i < 4096; i++) {
+  for(int i = 0; i < RISCV_PGSIZE; i++) {
     if(page[i] != val)
       return false;
   }
@@ -218,7 +188,7 @@ bool test_max(void)
   /* Allocate, evict, and publish frames */
   for(int i = 0; i < PFA_FREE_MAX; i++) {
     pages[i] = (void*)page_alloc();
-    memset(pages[i], i, 4096);
+    memset(pages[i], i, RISCV_PGSIZE);
     uintptr_t paddr = va2pa(pages[i]);
     pfa_evict_page(pages[i]);
     pfa_publish_freeframe(paddr);
@@ -247,38 +217,40 @@ bool test_max(void)
   return true;
 }
 
-/* Schenaningans due to PK's lack of a useful malloc */
-void **__testn_pages;
-uintptr_t *__testn_paddrs;
-int  __testn_n;
-int  __testn_i;
-#define test_n(N)  ({                         \
-  void *__testn_stat_pages[N];                \
-  uintptr_t __testn_stat_paddrs[N];           \
-  __testn_pages = __testn_stat_pages;         \
-  __testn_paddrs = __testn_stat_paddrs;       \
-  __testn_n = N;                              \
-  __testn_i = 0;                              \
-  __test_n(__testn_pages, __testn_paddrs, N); \
-    })
-bool __test_n(void **pages, uintptr_t *paddrs, int n)
-{
+/* Test unbounded number of pages.
+ * Note: __handle_page_fault is dealing with newpage and freeframe management
+ * WARNING: This function leaks like a sieve (probably 2n pages) 
+ * WARNING: Since we're in the kernel, total memory is capped at 2MB. test_n works up
+ * to about 512 pages in practice. If you really want to test larger, you can
+ * modify mmap.c:pk_vm_init and set free_pages = mem_pages. This is probably
+ * fine but I can't be sure.*/
+#define PTRS_PER_PAGE (RISCV_PGSIZE / sizeof(void*))
+bool test_n(int n) {
   printk("Test_%d\n", n);
-  /* Allocate and evict batch of pages
-   * Don't publish frames though, let page fault handler do that */
-  for(int i = 0; i < n; i++) {
-    pages[i] = (void*)page_alloc();
-    paddrs[i] = va2pa(pages[i]);
-    memset(pages[i], i, 4096);
-    pfa_evict_page(pages[i]);
-  }
+  void **pages = (void**)page_alloc();
 
-  /* Start touching! */
-  for(int i = n - 1; i >= 0; i--) {
-    if(!page_cmp(pages[i], i)) {
-      printk("Unexpected value in page %d: %d\n", i, *(uint8_t*)pages[i]);
-      return false;
+  int nleft = n;
+  while(nleft) {
+    /* How many to do this iteration */
+    int local_n = MIN(n, PTRS_PER_PAGE);
+
+    /* Allocate and evict a bunch of pages.
+     * Note: We'll never get the paddr or vaddr back after this */
+    for(int i = 0; i < local_n; i++) {
+      pages[i] = (void*)page_alloc();
+      memset(pages[i], i, RISCV_PGSIZE);
+      pfa_evict_page(pages[i]);
     }
+    
+    /* Touch all the stuff we just evicted */
+    for(int i = 0; i < local_n; i++) {
+      if(!page_cmp(pages[i], i)) {
+        printk("Unexpected value in page %d: %d\n", i, *(uint8_t*)pages[i]);
+        return false;
+      }
+    }
+
+    nleft -= local_n;
   }
 
   /* Finish draining the new page queue in case the page fault handler didn't
@@ -288,6 +260,123 @@ bool __test_n(void **pages, uintptr_t *paddrs, int n)
   while( (newpage = pfa_pop_newpage()) ) {}
 
   printk("Test_%d Success\n", n);
+  return true;
+}
+
+/* Test fetch of an invalid page (should cause page fault) */
+uintptr_t test_inval_vaddr = -1;
+bool test_inval_touched = false;
+bool test_inval(void)
+{
+  printk("test_inval\n");
+
+  uint8_t *page = (uint8_t*) page_alloc();
+  uintptr_t paddr = va2pa((void*)page);
+  pte_t *ptep = walk((uintptr_t)page);
+
+  /* Mark page invalid */
+  *ptep &= ~(PTE_V);
+  flush_tlb();
+
+  pfa_evict_page((void*)page);
+  pfa_publish_freeframe(paddr);
+  
+  /* Touch it, should cause page fault */
+  test_inval_vaddr = (uintptr_t)page;
+  *page = 17;
+
+  if(!test_inval_touched) {
+    printk("Didn't receive page fault on invalid page\n");
+    return false;
+  }
+
+  /* Finish draining the new page queue in case the page fault handler didn't
+   * grab all of them (so we leave the PFA in a good state for subsequent 
+   * tests*/
+  void *newpage;
+  while( (newpage = pfa_pop_newpage()) ) {}
+
+  printk("test_inval success\n");
+  return true;
+}
+
+/* Evicts the same vaddr multiple times */
+bool test_repeat(void)
+{
+  printk("test_repeat\n");
+
+  /* Volatile to force multiple queries to memory */
+  volatile uint8_t *page = (volatile uint8_t*) page_alloc();
+  uintptr_t paddr = va2pa((void*)page);
+  *page = 17;
+
+  pfa_evict_page((void*)page);
+
+  int poll_count = 0;
+  while(pfa_poll_evict() == 0) {
+    if(poll_count++ == MAX_POLL_ITER) {
+      printk("Polling for eviction completion took too long\n");
+      return false;
+    }
+  }
+
+  pfa_publish_freeframe(paddr);
+
+  /* Force rmem fault */
+  *page = 42;
+
+  uint64_t nnew = pfa_check_newpage();
+  if(nnew != 1) {
+    printk("New page queue reporting wrong number of new pages: %ld\n", nnew);
+    return false;
+  }
+
+  void* newpage = pfa_pop_newpage();
+
+  if(newpage != page) {
+    printk("Newpage (%p) doesn't match fetched page (%p)\n", newpage, page);
+    return false;
+  }
+ 
+  pte_t newpte = *walk((uintptr_t)newpage);
+  if(pte_is_remote(newpte)) {
+    printk("PTE Still marked remote!\n");
+    return false;
+  }
+
+  if(*page != 42) {
+    if(*page == 17) {
+      printk("Page didn't get faulting write\n");
+      return false;
+    } else {
+      printk("Page has garbage\n");
+      return false;
+    }
+  }
+
+  /* Now evict again! */
+  pfa_evict_page((void*)page);
+  pfa_publish_freeframe(paddr);
+  poll_count = 0;
+  while(pfa_poll_evict() == 0) {
+    if(poll_count++ == MAX_POLL_ITER) {
+      printk("Polling for eviction completion took too long\n");
+      return false;
+    }
+  }
+ 
+  /* Fetch again */
+  if(*page != 42) {
+    if(*page == 17) {
+      printk("Fetched old version of page\n");
+      return false;
+    } else {
+      printk("Page has garbage\n");
+      return false;
+    }
+  }
+
+  printk("test_repeat success\n\n");
   return true;
 }
 
@@ -315,13 +404,18 @@ int main()
     return EXIT_FAILURE;
   }
 
-  if(!test_n(256)) {
-    printk("Test Failure!\n");
+  if(!test_inval()) {
+    printk("Test Failure\n");
     return EXIT_FAILURE;
   }
 
-  if(!test_inval()) {
+  if(!test_repeat()) {
     printk("Test Failure\n");
+    return EXIT_FAILURE;
+  }
+
+  if(!test_n(512)) {
+    printk("Test Failure!\n");
     return EXIT_FAILURE;
   }
 
