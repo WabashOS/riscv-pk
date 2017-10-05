@@ -13,9 +13,6 @@
 
 elf_info current;
 
-/* Max time to poll for completion for PFA stuff. Assume that the device is
- * broken if you have to poll this many times. Currently very conservative. */
-#define MAX_POLL_ITER 1024*1024
 
 /* Test one page. Evict, publish frame as free, then touch and check newpage */
 bool test_one(bool flush)
@@ -32,13 +29,9 @@ bool test_one(bool flush)
     flush_tlb();
   }
 
-  int poll_count = 0;
-  while(pfa_poll_evict() == 0) {
-    if(poll_count++ == MAX_POLL_ITER) {
-      printk("Polling for eviction completion took too long\n");
-      return false;
-    }
-  }
+  if(!pfa_poll_evict())
+    return false;
+
   if(flush) {
     flush_tlb();
   }
@@ -312,13 +305,8 @@ bool test_repeat(void)
 
   pfa_evict_page((void*)page);
 
-  int poll_count = 0;
-  while(pfa_poll_evict() == 0) {
-    if(poll_count++ == MAX_POLL_ITER) {
-      printk("Polling for eviction completion took too long\n");
-      return false;
-    }
-  }
+  if(!pfa_poll_evict())
+    return false;
 
   pfa_publish_freeframe(paddr);
 
@@ -357,13 +345,8 @@ bool test_repeat(void)
   /* Now evict again! */
   pfa_evict_page((void*)page);
   pfa_publish_freeframe(paddr);
-  poll_count = 0;
-  while(pfa_poll_evict() == 0) {
-    if(poll_count++ == MAX_POLL_ITER) {
-      printk("Polling for eviction completion took too long\n");
-      return false;
-    }
-  }
+  if(!pfa_poll_evict())
+    return false;
  
   /* Fetch again */
   if(*page != 42) {

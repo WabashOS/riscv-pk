@@ -29,11 +29,17 @@ void pfa_evict_page(void const *page)
   flush_tlb();
 }
 
-uintptr_t pfa_poll_evict()
-{
-  assert(*PFA_EVICTSTAT > 0);
-  uintptr_t evicted = (uintptr_t)*PFA_EVICTPAGE;
-  return evicted;
+bool pfa_poll_evict(void)
+{ 
+  int poll_count = 0;
+  while(*PFA_EVICTSTAT < PFA_EVICT_MAX) {
+    if(poll_count++ == MAX_POLL_ITER) {
+      printk("Polling for eviction completion took too long\n");
+      return false;
+    }
+  }
+
+  return true;
 }
 
 void *pfa_pop_newpage()

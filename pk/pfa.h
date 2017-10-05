@@ -26,6 +26,10 @@
 
 #define pte_is_remote(pte) (!(pte & PTE_V) && (pte & PFA_REMOTE))
 
+/* Max time to poll for completion for PFA stuff. Assume that the device is
+ * broken if you have to poll this many times. Currently very conservative. */
+#define MAX_POLL_ITER 1024*1024
+
 /* Turn a regular pte into a remote pte with page_id */
 pte_t pfa_mk_remote_pte(uint64_t page_id, pte_t orig_pte);
 
@@ -34,9 +38,8 @@ uint64_t pfa_check_freeframes(void);
 void pfa_publish_freeframe(uintptr_t paddr);
 void pfa_evict_page(void const *page);
 
-/* Returns vaddr of last evicted page or 0 if page still being evicted. 
- * uintptr_t to discourage dereferencing. */
-uintptr_t pfa_poll_evict(void);
+/* Blocks (spin) until all pages in evictq are successfully evicted */
+bool pfa_poll_evict(void);
 
 /* returns vaddr of most recently fetched page, or NULL if no page was fetched
  * since the last call */
