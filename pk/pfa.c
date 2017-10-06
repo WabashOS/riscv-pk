@@ -55,7 +55,9 @@ bool pfa_poll_evict(void)
 
 pgid_t pfa_pop_newpage()
 {
-  return (pgid_t)(*PFA_NEWPAGE);
+  /*XXX Discard the vaddr for now */
+  volatile uint64_t vaddr = *PFA_NEWVADDR;
+  return (pgid_t)(*PFA_NEWPGID);
 }
 
 uint64_t pfa_check_newpage()

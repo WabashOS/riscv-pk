@@ -11,8 +11,9 @@
 #define PFA_FREESTAT       ((volatile uint64_t*)(PFA_BASE + 8))
 #define PFA_EVICTPAGE      ((volatile uint64_t*)(PFA_BASE + 16))
 #define PFA_EVICTSTAT      ((volatile uint64_t*)(PFA_BASE + 24))
-#define PFA_NEWPAGE        ((volatile uint64_t*)(PFA_BASE + 32))
-#define PFA_NEWSTAT        ((volatile uint64_t*)(PFA_BASE + 40))
+#define PFA_NEWPGID       ((volatile uint64_t*)(PFA_BASE + 32))
+#define PFA_NEWVADDR        ((volatile uint64_t*)(PFA_BASE + 40))
+#define PFA_NEWSTAT        ((volatile uint64_t*)(PFA_BASE + 48))
 
 /* PFA Limits (implementation-specific) */
 #define PFA_FREE_MAX 64
