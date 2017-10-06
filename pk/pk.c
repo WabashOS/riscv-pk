@@ -18,13 +18,14 @@ elf_info current;
 bool test_one(bool flush)
 {
   printk("test_one: %s\n", flush ? "Flush TLB" : "Don't Flush TLB");
+
   /* Volatile to force multiple queries to memory */
   volatile uint8_t *page = (volatile uint8_t*) page_alloc();
   uintptr_t paddr = va2pa((void*)page);
   /* we use index 10 to make sure the PFA works even with unaligned accesses */
   page[10] = 17;
 
-  pfa_evict_page((void*)page);
+  pgid_t pgid = pfa_evict_page((void*)page);
   if(flush) {
     flush_tlb();
   }
@@ -53,16 +54,15 @@ bool test_one(bool flush)
     return false;
   }
 
-  void* newpage = pfa_pop_newpage();
+  pgid_t newpage = pfa_pop_newpage();
+  if(newpage != pgid) {
+    printk("Newpage id (%d) doesn't match fetched page (%d)\n", newpage, pgid);
+    return false;
+  }
   if(flush) {
     flush_tlb();
   }
 
-  if(newpage != page) {
-    printk("Newpage (%p) doesn't match fetched page (%p)\n", newpage, page);
-    return false;
-  }
- 
   pte_t newpte = *walk((uintptr_t)newpage);
   if(pte_is_remote(newpte)) {
     printk("PTE Still marked remote!\n");
@@ -111,8 +111,9 @@ bool test_two()
   printk("(P0,P1): (%p,%p)\n", p0, p1);
   printk("(F0,F1): (%lx,%lx)\n", f0, f1);
 
-  pfa_evict_page(p0);
-  pfa_evict_page(p1);
+  /* pg IDs (i*) */
+  pgid_t i0 = pfa_evict_page(p0);
+  pgid_t i1 = pfa_evict_page(p1);
   pfa_publish_freeframe(f0);
   pfa_publish_freeframe(f1);
 
@@ -125,8 +126,8 @@ bool test_two()
   v0_after = *(uint8_t*)p0;
   
   /* Get newpage info */
-  void *n1 = pfa_pop_newpage();
-  void *n0 = pfa_pop_newpage();
+  pgid_t n1 = pfa_pop_newpage();
+  pgid_t n0 = pfa_pop_newpage();
 
   /* Check which frame the page was fetched into. We expect the pages to have
    * swapped frames since we fetched in reverse order and freeq is a FIFO */
@@ -135,7 +136,7 @@ bool test_two()
   
   if(f0_after != f1 || f1_after != f0 ||
      v1_after != v1 || v0_after != v0 ||
-     p0 != n0       || p1 != n1)
+     i0 != n0       || i1 != n1)
   {
     printk("Test Failed:\n");
     printk("Expected:\n\n");
@@ -177,13 +178,14 @@ bool test_max(void)
 {
   printk("test_max\n");
   void *pages[PFA_FREE_MAX];
+  pgid_t ids[PFA_FREE_MAX];
 
   /* Allocate, evict, and publish frames */
   for(int i = 0; i < PFA_FREE_MAX; i++) {
     pages[i] = (void*)page_alloc();
     memset(pages[i], i, RISCV_PGSIZE);
     uintptr_t paddr = va2pa(pages[i]);
-    pfa_evict_page(pages[i]);
+    ids[i] = pfa_evict_page(pages[i]);
     pfa_publish_freeframe(paddr);
   }
 
@@ -199,8 +201,8 @@ bool test_max(void)
 
   /* Drain newpage queue sepparately to stress it out a bit */
   for(int i = PFA_FREE_MAX - 1; i >= 0; i--) {
-    void* newpage = pfa_pop_newpage();
-    if(newpage != pages[i]) {
+    pgid_t newpage = pfa_pop_newpage();
+    if(newpage != ids[i]) {
       printk("Newpage (%p) doesn't match fetched page (%p)\n", newpage, pages[i]);
       return false;
     }
@@ -249,8 +251,7 @@ bool test_n(int n) {
   /* Finish draining the new page queue in case the page fault handler didn't
    * grab all of them (so we leave the PFA in a good state for subsequent 
    * tests*/
-  void *newpage;
-  while( (newpage = pfa_pop_newpage()) ) {}
+  pfa_drain_newq();
 
   printk("Test_%d Success\n", n);
   return true;
@@ -271,7 +272,7 @@ bool test_inval(void)
   *ptep &= ~(PTE_V);
   flush_tlb();
 
-  pfa_evict_page((void*)page);
+  pgid_t pgid = pfa_evict_page((void*)page);
   pfa_publish_freeframe(paddr);
   
   /* Touch it, should cause page fault */
@@ -286,8 +287,7 @@ bool test_inval(void)
   /* Finish draining the new page queue in case the page fault handler didn't
    * grab all of them (so we leave the PFA in a good state for subsequent 
    * tests*/
-  void *newpage;
-  while( (newpage = pfa_pop_newpage()) ) {}
+  pfa_drain_newq();
 
   printk("test_inval success\n");
   return true;
@@ -303,7 +303,7 @@ bool test_repeat(void)
   uintptr_t paddr = va2pa((void*)page);
   *page = 17;
 
-  pfa_evict_page((void*)page);
+  pgid_t pgid = pfa_evict_page((void*)page);
 
   if(!pfa_poll_evict())
     return false;
@@ -319,10 +319,10 @@ bool test_repeat(void)
     return false;
   }
 
-  void* newpage = pfa_pop_newpage();
+  pgid_t newpage = pfa_pop_newpage();
 
-  if(newpage != page) {
-    printk("Newpage (%p) doesn't match fetched page (%p)\n", newpage, page);
+  if(newpage != pgid) {
+    printk("Newpage (%d) doesn't match fetched page (%d)\n", newpage, pgid);
     return false;
   }
  
@@ -343,7 +343,7 @@ bool test_repeat(void)
   }
 
   /* Now evict again! */
-  pfa_evict_page((void*)page);
+  pgid = pfa_evict_page((void*)page);
   pfa_publish_freeframe(paddr);
   if(!pfa_poll_evict())
     return false;
@@ -357,6 +357,13 @@ bool test_repeat(void)
       printk("Page has garbage\n");
       return false;
     }
+  }
+
+  /* Drain newq to leave state clean */
+  newpage = pfa_pop_newpage();
+  if(newpage != pgid) {
+    printk("Second fetch returned wrong ID\n");
+    return false;
   }
 
   printk("test_repeat success\n\n");

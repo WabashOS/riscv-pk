@@ -189,7 +189,7 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
     }
 
     /* Drain newpage queue (right now we don't validate the output)*/
-    void *newpage;
+    pgid_t newpage;
     uint64_t nnew = pfa_check_newpage();
     if(nnew > PFA_NEW_MAX) {
       printk("Unreasonable number of new pages reported: %ld\n", nnew);
@@ -198,10 +198,6 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
 
     while(nnew) {
       newpage = pfa_pop_newpage();
-      if(newpage == 0) {
-        printk("Hit end of newpage queue (wrong number from NEW_STAT?)\n");
-        return -1;
-      }
       nnew--;
     }
     

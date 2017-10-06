@@ -17,16 +17,27 @@ void pfa_publish_freeframe(uintptr_t paddr)
   *PFA_FREEFRAME = paddr;
 }
 
-void pfa_evict_page(void const *page)
+pgid_t pfa_evict_page(void const *page)
 {
-  printk("Evicting va:%lx  pa:%lx\n", page, va2pa(page));
-  *PFA_EVICTPAGE = (uintptr_t)page;
-  *PFA_EVICTPAGE = va2pa(page);
+  static pgid_t pgid = 0;
+  uintptr_t paddr = va2pa(page);
+
+  printk("Evicting va:%lx, pa:%lx, pgid=%d\n", page, va2pa(page), pgid);
+
+  /* pfn goes in first 36bits, pgid goes in upper 28
+   * See pfa spec for details. */
+  uint64_t evict_val = paddr >> RISCV_PGSHIFT;
+  assert(evict_val >> 36 == 0);
+  assert(pgid >> 28 == 0);
+  evict_val |= (uint64_t)pgid << 36; 
+  *PFA_EVICTPAGE = evict_val;
   
   pte_t *page_pte = walk((uintptr_t) page);
   /* At the moment, the page_id is just the page-aligned vaddr */
-  *page_pte = pfa_mk_remote_pte((uintptr_t)page >> PFA_PAGEID_SHIFT, *page_pte);
+  *page_pte = pfa_mk_remote_pte(pgid, *page_pte);
   flush_tlb();
+
+  return pgid++;
 }
 
 bool pfa_poll_evict(void)
@@ -42,14 +53,25 @@ bool pfa_poll_evict(void)
   return true;
 }
 
-void *pfa_pop_newpage()
+pgid_t pfa_pop_newpage()
 {
-  return (void*)(*PFA_NEWPAGE << PFA_PAGEID_SHIFT);
+  return (pgid_t)(*PFA_NEWPAGE);
 }
 
 uint64_t pfa_check_newpage()
 {
   return *PFA_NEWSTAT;
+}
+
+/* Drain the new page queue without checking return values */
+void pfa_drain_newq(void)
+{
+  uint64_t nnew = pfa_check_newpage();
+  while(nnew) {
+    pfa_pop_newpage();
+    nnew--;
+  }
+  return;
 }
 
 pte_t pfa_mk_remote_pte(uint64_t page_id, pte_t orig_pte)
