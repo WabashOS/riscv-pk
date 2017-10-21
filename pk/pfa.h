@@ -6,13 +6,14 @@
 #include "atomic.h"
 #include <stdint.h>
 
-#define PFA_BASE           0x2000
+#define PFA_BASE           0x10017000 
+// #define PFA_BASE           0x2000
 #define PFA_FREEFRAME      ((volatile uintptr_t*)(PFA_BASE))
 #define PFA_FREESTAT       ((volatile uint64_t*)(PFA_BASE + 8))
 #define PFA_EVICTPAGE      ((volatile uint64_t*)(PFA_BASE + 16))
 #define PFA_EVICTSTAT      ((volatile uint64_t*)(PFA_BASE + 24))
-#define PFA_NEWPGID       ((volatile uint64_t*)(PFA_BASE + 32))
-#define PFA_NEWVADDR        ((volatile uint64_t*)(PFA_BASE + 40))
+#define PFA_NEWPGID        ((volatile uint64_t*)(PFA_BASE + 32))
+#define PFA_NEWVADDR       ((volatile uint64_t*)(PFA_BASE + 40))
 #define PFA_NEWSTAT        ((volatile uint64_t*)(PFA_BASE + 48))
 
 /* PFA Limits (implementation-specific) */

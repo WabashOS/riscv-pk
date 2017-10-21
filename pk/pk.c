@@ -63,7 +63,7 @@ bool test_one(bool flush)
     flush_tlb();
   }
 
-  pte_t newpte = *walk((uintptr_t)newpage);
+  pte_t newpte = *walk((uintptr_t)page);
   if(pte_is_remote(newpte)) {
     printk("PTE Still marked remote!\n");
     return false;
@@ -326,7 +326,7 @@ bool test_repeat(void)
     return false;
   }
  
-  pte_t newpte = *walk((uintptr_t)newpage);
+  pte_t newpte = *walk((uintptr_t)page);
   if(pte_is_remote(newpte)) {
     printk("PTE Still marked remote!\n");
     return false;
