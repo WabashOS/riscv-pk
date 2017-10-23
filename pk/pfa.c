@@ -3,8 +3,17 @@
 
 void pfa_init()
 {
-  // create virtual mapping for RPFH I/O area
+  printk("Initializing PFA\n");
+
+  // create virtual mapping for PFA I/O area
   __map_kernel_range(PFA_BASE, PFA_BASE, RISCV_PGSIZE, PROT_READ|PROT_WRITE|PROT_EXEC);
+
+  /* Provide scratch page for PFA */
+  void *pfa_scratch = (void*)page_alloc();
+  uintptr_t paddr = va2pa(pfa_scratch);
+  *PFA_INITMEM = paddr;
+
+  return;
 }
 
 uint64_t pfa_check_freeframes(void) {
@@ -21,8 +30,6 @@ pgid_t pfa_evict_page(void const *page)
 {
   static pgid_t pgid = 0;
   uintptr_t paddr = va2pa(page);
-
-  printk("Evicting va:%lx, pa:%lx, pgid=%d\n", page, va2pa(page), pgid);
 
   /* pfn goes in first 36bits, pgid goes in upper 28
    * See pfa spec for details. */
