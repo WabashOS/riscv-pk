@@ -6,7 +6,7 @@
 #include "atomic.h"
 #include <stdint.h>
 
-#define PFA_BASE           0x2000
+#define PFA_BASE           0x10017000
 #define PFA_FREEFRAME      ((volatile uintptr_t*)(PFA_BASE))
 #define PFA_FREESTAT       ((volatile uint64_t*)(PFA_BASE + 8))
 #define PFA_EVICTPAGE      ((volatile uint64_t*)(PFA_BASE + 16))
@@ -14,11 +14,12 @@
 #define PFA_NEWPGID       ((volatile uint64_t*)(PFA_BASE + 32))
 #define PFA_NEWVADDR        ((volatile uint64_t*)(PFA_BASE + 40))
 #define PFA_NEWSTAT        ((volatile uint64_t*)(PFA_BASE + 48))
+#define PFA_WORKBUF        ((volatile uint64_t*)(PFA_BASE + 56))
 
 /* PFA Limits (implementation-specific) */
 #define PFA_FREE_MAX 64
 #define PFA_NEW_MAX  64
-#define PFA_EVICT_MAX 1
+#define PFA_EVICT_SIZE 10
 
 /* PFA PTE Bits */
 #define PFA_PAGEID_SHIFT 12
@@ -29,7 +30,7 @@
 
 /* Max time to poll for completion for PFA stuff. Assume that the device is
  * broken if you have to poll this many times. Currently very conservative. */
-#define MAX_POLL_ITER 1024*1024
+#define MAX_POLL_ITER 30
 
 /* Page ID */
 #define PFA_PGID_BITS 28

@@ -25,6 +25,9 @@ bool test_one(bool flush)
   /* we use index 10 to make sure the PFA works even with unaligned accesses */
   page[10] = 17;
 
+  uint64_t *pte = (uint64_t *) walk((uintptr_t) page);
+  printk("pteaddr=%p pte=0x%x\n", pte, *pte);
+
   pgid_t pgid = pfa_evict_page((void*)page);
   if(flush) {
     flush_tlb();
@@ -53,17 +56,28 @@ bool test_one(bool flush)
     printk("New page queue reporting wrong number of new pages: %ld\n", nnew);
     return false;
   }
+  printk("from newpage queue, stat=%d\n", nnew);
 
   pgid_t newpage = pfa_pop_newpage();
   if(newpage != pgid) {
     printk("Newpage id (%d) doesn't match fetched page (%d)\n", newpage, pgid);
     return false;
   }
+
+  printk("from newpage queue, pageid=%d, \n");
+  nnew = pfa_check_newpage();
+  if(nnew != 0) {
+    printk("New page queue reporting wrong number of new pages: %ld\n", nnew);
+    return false;
+  }
+
+  printk("from newpage queue, stat=%d\n", nnew);
+
   if(flush) {
     flush_tlb();
   }
 
-  pte_t newpte = *walk((uintptr_t)newpage);
+  pte_t newpte = *walk((uintptr_t)page);
   if(pte_is_remote(newpte)) {
     printk("PTE Still marked remote!\n");
     return false;
@@ -119,12 +133,12 @@ bool test_two()
 
   /* Values */
   uint8_t v0_after, v1_after;
-  
+
   /* Fetch in reverse order of publishing.
    * This should result in the vaddrs switching paddrs. */
   v1_after = *(uint8_t*)p1;
   v0_after = *(uint8_t*)p0;
-  
+
   /* Get newpage info */
   pgid_t n1 = pfa_pop_newpage();
   pgid_t n0 = pfa_pop_newpage();
@@ -133,7 +147,7 @@ bool test_two()
    * swapped frames since we fetched in reverse order and freeq is a FIFO */
   uintptr_t f0_after = va2pa((void*)p0);
   uintptr_t f1_after = va2pa((void*)p1);
-  
+
   if(f0_after != f1 || f1_after != f0 ||
      v1_after != v1 || v0_after != v0 ||
      i0 != n0       || i1 != n1)
@@ -159,7 +173,7 @@ bool test_two()
   printk("(P0,P1): (%p,%p)\n", p0, p1);
   printk("(F0,F1): (0x%lx,0x%lx)\n", f0_after, f1_after);
   printk("(N0,N1): (%p,%p)\n", n0, n1);
-  
+
   printk("\n");
   return true;
 }
@@ -214,7 +228,7 @@ bool test_max(void)
 
 /* Test unbounded number of pages.
  * Note: __handle_page_fault is dealing with newpage and freeframe management
- * WARNING: This function leaks like a sieve (probably 2n pages) 
+ * WARNING: This function leaks like a sieve (probably 2n pages)
  * WARNING: Since we're in the kernel, total memory is capped at 2MB. test_n works up
  * to about 512 pages in practice. If you really want to test larger, you can
  * modify mmap.c:pk_vm_init and set free_pages = mem_pages. This is probably
@@ -236,7 +250,7 @@ bool test_n(int n) {
       memset(pages[i], i, RISCV_PGSIZE);
       pfa_evict_page(pages[i]);
     }
-    
+
     /* Touch all the stuff we just evicted */
     for(int i = 0; i < local_n; i++) {
       if(!page_cmp(pages[i], i)) {
@@ -249,7 +263,7 @@ bool test_n(int n) {
   }
 
   /* Finish draining the new page queue in case the page fault handler didn't
-   * grab all of them (so we leave the PFA in a good state for subsequent 
+   * grab all of them (so we leave the PFA in a good state for subsequent
    * tests*/
   pfa_drain_newq();
 
@@ -274,7 +288,7 @@ bool test_inval(void)
 
   pgid_t pgid = pfa_evict_page((void*)page);
   pfa_publish_freeframe(paddr);
-  
+
   /* Touch it, should cause page fault */
   test_inval_vaddr = (uintptr_t)page;
   *page = 17;
@@ -285,7 +299,7 @@ bool test_inval(void)
   }
 
   /* Finish draining the new page queue in case the page fault handler didn't
-   * grab all of them (so we leave the PFA in a good state for subsequent 
+   * grab all of them (so we leave the PFA in a good state for subsequent
    * tests*/
   pfa_drain_newq();
 
@@ -325,7 +339,7 @@ bool test_repeat(void)
     printk("Newpage (%d) doesn't match fetched page (%d)\n", newpage, pgid);
     return false;
   }
- 
+
   pte_t newpte = *walk((uintptr_t)newpage);
   if(pte_is_remote(newpte)) {
     printk("PTE Still marked remote!\n");
@@ -347,7 +361,7 @@ bool test_repeat(void)
   pfa_publish_freeframe(paddr);
   if(!pfa_poll_evict())
     return false;
- 
+
   /* Fetch again */
   if(*page != 42) {
     if(*page == 17) {
@@ -379,35 +393,35 @@ int main()
     return EXIT_FAILURE;
   }
 
-  if(!test_one(true)) {
-    printk("Test Failure!\n");
-    return EXIT_FAILURE;
-  }
+  //if(!test_one(true)) {
+  //  printk("Test Failure!\n");
+  //  return EXIT_FAILURE;
+  //}
 
-  if(!test_two()) {
-    printk("Test Failure!\n");
-    return EXIT_FAILURE;
-  }
+  //if(!test_two()) {
+  //  printk("Test Failure!\n");
+  //  return EXIT_FAILURE;
+  //}
 
-  if(!test_max()) {
-    printk("Test Failure!\n");
-    return EXIT_FAILURE;
-  }
+  //if(!test_max()) {
+  //  printk("Test Failure!\n");
+  //  return EXIT_FAILURE;
+  //}
 
-  if(!test_inval()) {
-    printk("Test Failure\n");
-    return EXIT_FAILURE;
-  }
+  //if(!test_inval()) {
+  //  printk("Test Failure\n");
+  //  return EXIT_FAILURE;
+  //}
 
-  if(!test_repeat()) {
-    printk("Test Failure\n");
-    return EXIT_FAILURE;
-  }
+  //if(!test_repeat()) {
+  //  printk("Test Failure\n");
+  //  return EXIT_FAILURE;
+  //}
 
-  if(!test_n(512)) {
-    printk("Test Failure!\n");
-    return EXIT_FAILURE;
-  }
+  //if(!test_n(512)) {
+  //  printk("Test Failure!\n");
+  //  return EXIT_FAILURE;
+  //}
 
   printk("Test Success!\n");
   return EXIT_SUCCESS;

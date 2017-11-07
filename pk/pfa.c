@@ -1,10 +1,14 @@
 #include "pfa.h"
+#include "mmap.h"
 #include "frontend.h"
 
 void pfa_init()
 {
   // create virtual mapping for RPFH I/O area
   __map_kernel_range(PFA_BASE, PFA_BASE, RISCV_PGSIZE, PROT_READ|PROT_WRITE|PROT_EXEC);
+  // register a workbuf so the pfa can assemble nic packets
+  uintptr_t workbuf = page_alloc();
+  *PFA_WORKBUF = workbuf;
 }
 
 uint64_t pfa_check_freeframes(void) {
@@ -19,7 +23,7 @@ void pfa_publish_freeframe(uintptr_t paddr)
 
 pgid_t pfa_evict_page(void const *page)
 {
-  static pgid_t pgid = 0;
+  static pgid_t pgid = 8;
   uintptr_t paddr = va2pa(page);
 
   printk("Evicting va:%lx, pa:%lx, pgid=%d\n", page, va2pa(page), pgid);
@@ -29,9 +33,9 @@ pgid_t pfa_evict_page(void const *page)
   uint64_t evict_val = paddr >> RISCV_PGSHIFT;
   assert(evict_val >> 36 == 0);
   assert(pgid >> 28 == 0);
-  evict_val |= (uint64_t)pgid << 36; 
+  evict_val |= (uint64_t)pgid << 36;
   *PFA_EVICTPAGE = evict_val;
-  
+
   pte_t *page_pte = walk((uintptr_t) page);
   /* At the moment, the page_id is just the page-aligned vaddr */
   *page_pte = pfa_mk_remote_pte(pgid, *page_pte);
@@ -41,9 +45,11 @@ pgid_t pfa_evict_page(void const *page)
 }
 
 bool pfa_poll_evict(void)
-{ 
+{
   int poll_count = 0;
-  while(*PFA_EVICTSTAT < PFA_EVICT_MAX) {
+  int64_t evictstat = -1;
+  while((evictstat = *PFA_EVICTSTAT) < PFA_EVICT_SIZE) {
+    printk("evictstat = %d\n", evictstat);
     if(poll_count++ == MAX_POLL_ITER) {
       printk("Polling for eviction completion took too long\n");
       return false;
