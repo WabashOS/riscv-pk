@@ -5,8 +5,10 @@
 #include "bits.h"
 #include "vm.h"
 #include "uart.h"
+#include "finisher.h"
 #include "fdt.h"
 #include "unprivileged_memory.h"
+#include "platform_interface.h"
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -20,15 +22,21 @@ static uintptr_t mcall_console_putchar(uint8_t ch)
 {
   if (uart) {
     uart_putchar(ch);
-  } else {
+  } else if (platform__use_htif()) {
     htif_console_putchar(ch);
   }
   return 0;
 }
 
-void poweroff()
+void poweroff(uint16_t code)
 {
-  htif_poweroff();
+  printm("Power off\n");
+  finisher_exit(code);
+  if (platform__use_htif()) {
+    htif_poweroff();
+  } else {
+    while (1);
+  }
 }
 
 void putstring(const char* s)
@@ -37,21 +45,25 @@ void putstring(const char* s)
     mcall_console_putchar(*s++);
 }
 
-void printm(const char* s, ...)
+void vprintm(const char* s, va_list vl)
 {
   char buf[256];
+  vsnprintf(buf, sizeof buf, s, vl);
+  putstring(buf);
+}
+
+void printm(const char* s, ...)
+{
   va_list vl;
 
   va_start(vl, s);
-  vsnprintf(buf, sizeof buf, s, vl);
+  vprintm(s, vl);
   va_end(vl);
-
-  putstring(buf);
 }
 
 static void send_ipi(uintptr_t recipient, int event)
 {
-  if (((DISABLED_HART_MASK >> recipient) & 1)) return;
+  if (((platform__disabled_hart_mask >> recipient) & 1)) return;
   atomic_or(&OTHER_HLS(recipient)->mipi_pending, event);
   mb();
   *OTHER_HLS(recipient)->ipi = 1;
@@ -61,8 +73,10 @@ static uintptr_t mcall_console_getchar()
 {
   if (uart) {
     return uart_getchar();
-  } else {
+  } else if (platform__use_htif()) {
     return htif_console_getchar();
+  } else {
+    return '\0';
   }
 }
 
@@ -73,7 +87,7 @@ static uintptr_t mcall_clear_ipi()
 
 static uintptr_t mcall_shutdown()
 {
-  poweroff();
+  poweroff(0);
 }
 
 static uintptr_t mcall_set_timer(uint64_t when)
@@ -82,6 +96,23 @@ static uintptr_t mcall_set_timer(uint64_t when)
   clear_csr(mip, MIP_STIP);
   set_csr(mie, MIP_MTIP);
   return 0;
+}
+
+static uintptr_t mcall_disk_read(uintptr_t addr, uintptr_t offset, size_t size)
+{
+  htif_disk_read(addr, offset, size);
+  return 0;
+}
+
+static uintptr_t mcall_disk_write(uintptr_t addr, uintptr_t offset, size_t size)
+{
+  htif_disk_write(addr, offset, size);
+  return 0;
+}
+
+static uintptr_t mcall_disk_size(void)
+{
+  return htif_disk_size();
 }
 
 static void send_ipi_many(uintptr_t* pmask, int event)
@@ -118,7 +149,8 @@ void mcall_trap(uintptr_t* regs, uintptr_t mcause, uintptr_t mepc)
 {
   write_csr(mepc, mepc + 4);
 
-  uintptr_t n = regs[17], arg0 = regs[10], arg1 = regs[11], retval, ipi_type;
+  uintptr_t n = regs[17], arg0 = regs[10], arg1 = regs[11], arg2 = regs[12];
+  uintptr_t retval, ipi_type;
 
   switch (n)
   {
@@ -153,6 +185,15 @@ send_ipi:
 #else
       retval = mcall_set_timer(arg0);
 #endif
+      break;
+    case SBI_DISK_READ:
+      retval = mcall_disk_read(arg0, arg1, arg2);
+      break;
+    case SBI_DISK_WRITE:
+      retval = mcall_disk_write(arg0, arg1, arg2);
+      break;
+    case SBI_DISK_SIZE:
+      retval = mcall_disk_size();
       break;
     default:
       retval = -ENOSYS;
