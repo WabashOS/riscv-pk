@@ -167,6 +167,8 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
 
   pte_t* pte = __walk(vaddr);
 
+  printk("handle_page_fault, pte=%lx vaddr=%p\n", *pte, vaddr);
+
   /* Check for test_inval's special page */
   if (vaddr == test_inval_vaddr) {
     printk("Saw page fault on test_inval special addr\n");
@@ -178,7 +180,7 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
 
   /* Check for remote pages, signifies the PFA requested help */
   if (pte && pte_is_remote(*pte)) {
-
+    printk("handle_page_fault: pte is remote\n");
     /* Fill the free frame queue */
     uint64_t nfree_needed = pfa_check_freeframes();
     while(nfree_needed) {
@@ -200,13 +202,14 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
       newpage = pfa_pop_newpage();
       nnew--;
     }
-    
+
     nnew = pfa_check_newpage();
     if(nnew != 0) {
       printk("NEW_STAT reporting %ld pages even though we drained it!\n", nnew);
       return -1;
     }
 
+    flush_tlb();
     return 0;
   }
 

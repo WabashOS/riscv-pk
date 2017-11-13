@@ -18,9 +18,9 @@
 #define PFA_INITMEM        ((volatile uint64_t*)(PFA_BASE + 56))
 
 /* PFA Limits (implementation-specific) */
-#define PFA_FREE_MAX 64
-#define PFA_NEW_MAX  64
-#define PFA_EVICT_MAX 1
+#define PFA_FREE_MAX 10
+#define PFA_NEW_MAX  10
+#define PFA_EVICT_MAX 10
 
 /* PFA PTE Bits */
 #define PFA_PAGEID_SHIFT 12

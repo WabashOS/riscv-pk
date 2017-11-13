@@ -69,6 +69,8 @@ bool test_one(bool flush)
     return false;
   }
 
+  printk("page[10]=%d\n", page[10]);
+
   if(page[10] != 42) {
     if(page[10] == 17) {
       printk("Page didn't get faulting write\n");
@@ -80,6 +82,56 @@ bool test_one(bool flush)
   }
 
   printk("test_one success\n\n");
+  return true;
+}
+
+bool test_read_allbytes()
+{
+  printk("test_read_allbytes\n");
+
+  char *p0 = (char *) page_alloc(); // evicted page
+  char *p1 = (char *) page_alloc(); // free page
+  uintptr_t p0_paddr = va2pa((void*)p0);
+  uintptr_t p1_paddr = va2pa((void*)p1);
+  pte_t p0_pte = *walk((uintptr_t)p0);
+  pte_t p1_pte = *walk((uintptr_t)p1);
+
+  printk("p0: vaddr=%p paddr=%p pte=%lx pteaddr=%p\n", p0, p0_paddr, p0_pte, &p0_pte);
+  printk("p1: vaddr=%p paddr=%p pte=%lx pteaddr=%p\n", p1, p1_paddr, p1_pte, &p1_pte);
+
+  for (int i = 0; i < 4096; ++i) {
+    p0[i] = i % 255;
+  }
+
+  pgid_t pgid = pfa_evict_page((void*) p0);
+
+  if(!pfa_poll_evict())
+    return false;
+
+  pfa_publish_freeframe(p1_paddr);
+
+  /* fetch */
+  for (int i = 0; i < 4096; i++) {
+    if (p0[i] != i % 255) {
+      printk("p0[%d] didn't match expected =%d\n", i, i % 255);
+      return false;
+    }
+  }
+  printk("\n");
+
+  p0_pte = *walk((uintptr_t) p0);
+  p0_paddr = va2pa((void*) p0);
+
+  printk("after fetch p0: vaddr=%p paddr=%p pte=%lx pteaddr=%p\n", p0, p0_paddr, p0_pte, &p0_pte);
+
+  if (p0_pte != p1_pte || p0_paddr != p1_paddr) {
+    printk("ptes or paddrs were not updated properly\n");
+    return false;
+  }
+
+  pfa_pop_newpage();
+
+  printk("test_read_allbytes success\n\n");
   return true;
 }
 
@@ -96,9 +148,13 @@ bool test_two()
   void *p0 = (void*) page_alloc();
   void *p1 = (void*) page_alloc();
 
+  pte_t pte0 = *walk((uintptr_t)p0);
+  pte_t pte1 = *walk((uintptr_t)p1);
+  printk("pte0=%lx pte1=%lx\n", pte0, pte1);
+
   /* Frames */
-  uintptr_t f0 = va2pa((void*)p0);
-  uintptr_t f1 = va2pa((void*)p1);
+  uintptr_t f0 = va2pa(p0);
+  uintptr_t f1 = va2pa(p1);
 
   /* Values */
   uint8_t v0 = 17;
@@ -119,12 +175,16 @@ bool test_two()
 
   /* Values */
   uint8_t v0_after, v1_after;
-  
+
   /* Fetch in reverse order of publishing.
    * This should result in the vaddrs switching paddrs. */
   v1_after = *(uint8_t*)p1;
   v0_after = *(uint8_t*)p0;
-  
+
+  pte0 = *walk((uintptr_t)p0);
+  pte1 = *walk((uintptr_t)p1);
+  printk("pte0=%lx pte1=%lx\n", pte0, pte1);
+
   /* Get newpage info */
   pgid_t n1 = pfa_pop_newpage();
   pgid_t n0 = pfa_pop_newpage();
@@ -143,7 +203,7 @@ bool test_two()
     printk("(V0,V1): (%d,%d)\n", v0, v1);
     printk("(P0,P1): (%p,%p)\n", p0, p1);
     printk("(F0,F1): (0x%lx,0x%lx)\n", f1, f0);
-    printk("(N0,N1): (%p,%p)\n", p0, p1);
+    printk("(N0,N1): (%p,%p)\n", i0, i1);
 
     printk("\nGot:\n");
     printk("(V0,V1): (%d,%d)\n", v0_after, v1_after);
@@ -236,9 +296,10 @@ bool test_n(int n) {
       memset(pages[i], i, RISCV_PGSIZE);
       pfa_evict_page(pages[i]);
     }
-    
+
     /* Touch all the stuff we just evicted */
     for(int i = 0; i < local_n; i++) {
+      printk("pages[i] = %p\n", pages[i]);
       if(!page_cmp(pages[i], i)) {
         printk("Unexpected value in page %d: %d\n", i, *(uint8_t*)pages[i]);
         return false;
@@ -342,12 +403,14 @@ bool test_repeat(void)
     }
   }
 
+  printk("evict same page again\n");
   /* Now evict again! */
   pgid = pfa_evict_page((void*)page);
-  pfa_publish_freeframe(paddr);
   if(!pfa_poll_evict())
     return false;
- 
+
+  pfa_publish_freeframe(paddr);
+
   /* Fetch again */
   if(*page != 42) {
     if(*page == 17) {
@@ -384,6 +447,11 @@ int main()
     return EXIT_FAILURE;
   }
 
+  if(!test_read_allbytes()) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
   if(!test_two()) {
     printk("Test Failure!\n");
     return EXIT_FAILURE;
@@ -404,7 +472,7 @@ int main()
     return EXIT_FAILURE;
   }
 
-  if(!test_n(512)) {
+  if(!test_n(32)) { // takes about 2m cycles
     printk("Test Failure!\n");
     return EXIT_FAILURE;
   }

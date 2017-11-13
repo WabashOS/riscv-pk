@@ -48,9 +48,10 @@ pgid_t pfa_evict_page(void const *page)
 }
 
 bool pfa_poll_evict(void)
-{ 
+{
   int poll_count = 0;
-  while(*PFA_EVICTSTAT < PFA_EVICT_MAX) {
+  volatile uint64_t *evictstat = PFA_EVICTSTAT;
+  while(*evictstat < PFA_EVICT_MAX) {
     if(poll_count++ == MAX_POLL_ITER) {
       printk("Polling for eviction completion took too long\n");
       return false;
