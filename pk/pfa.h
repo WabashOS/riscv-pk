@@ -6,7 +6,7 @@
 #include "atomic.h"
 #include <stdint.h>
 
-#define PFA_BASE           0x10017000 
+#define PFA_BASE           0x10017000
 // #define PFA_BASE           0x2000
 #define PFA_FREEFRAME      ((volatile uintptr_t*)(PFA_BASE))
 #define PFA_FREESTAT       ((volatile uint64_t*)(PFA_BASE + 8))
@@ -18,9 +18,10 @@
 #define PFA_INITMEM        ((volatile uint64_t*)(PFA_BASE + 56))
 
 /* PFA Limits (implementation-specific) */
-#define PFA_FREE_MAX 10
-#define PFA_NEW_MAX  10
-#define PFA_EVICT_MAX 10
+#define PFA_QUEUES_SIZE 10
+#define PFA_FREE_MAX (PFA_QUEUES_SIZE)
+#define PFA_NEW_MAX  (PFA_QUEUES_SIZE)
+#define PFA_EVICT_MAX (PFA_QUEUES_SIZE)
 
 /* PFA PTE Bits */
 #define PFA_PAGEID_SHIFT 12
@@ -60,5 +61,11 @@ uint64_t pfa_check_newpage(void);
 
 /* Pop all pages off new page queue. Don't check the results */
 void pfa_drain_newq(void);
+
+bool pfa_is_newqueue_empty(void);
+
+bool pfa_is_evictqueue_empty(void);
+
+bool pfa_is_freequeue_empty(void);
 
 #endif

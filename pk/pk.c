@@ -13,6 +13,26 @@
 
 elf_info current;
 
+bool queues_empty() {
+  bool ret = true;
+
+  if (!pfa_is_newqueue_empty()) {
+    printk("new queue is not empty\n");
+    ret = false;
+  }
+
+  if (!pfa_is_evictqueue_empty()) {
+    printk("evict queue is not empty\n");
+    ret = false;
+  }
+
+  if (!pfa_is_freequeue_empty()) {
+    printk("free queue is not empty\n");
+    ret = false;
+  }
+
+  return ret;
+}
 
 /* Test one page. Evict, publish frame as free, then touch and check newpage */
 bool test_one(bool flush)
@@ -81,6 +101,10 @@ bool test_one(bool flush)
     }
   }
 
+  if (!queues_empty()) {
+    return false;
+  }
+
   printk("test_one success\n\n");
   return true;
 }
@@ -130,6 +154,10 @@ bool test_read_allbytes()
   }
 
   pfa_pop_newpage();
+
+  if (!queues_empty()) {
+    return false;
+  }
 
   printk("test_read_allbytes success\n\n");
   return true;
@@ -193,7 +221,7 @@ bool test_two()
    * swapped frames since we fetched in reverse order and freeq is a FIFO */
   uintptr_t f0_after = va2pa((void*)p0);
   uintptr_t f1_after = va2pa((void*)p1);
-  
+
   if(f0_after != f1 || f1_after != f0 ||
      v1_after != v1 || v0_after != v0 ||
      i0 != n0       || i1 != n1)
@@ -214,12 +242,16 @@ bool test_two()
     return false;
   }
 
+  if (!queues_empty()) {
+    return false;
+  }
+
   printk("test_two success:\n");
   printk("(V0,V1): (%d,%d)\n", *(uint8_t*)p0, *(uint8_t*)p1);
   printk("(P0,P1): (%p,%p)\n", p0, p1);
   printk("(F0,F1): (0x%lx,0x%lx)\n", f0_after, f1_after);
   printk("(N0,N1): (%p,%p)\n", n0, n1);
-  
+
   printk("\n");
   return true;
 }
@@ -268,13 +300,17 @@ bool test_max(void)
     }
   }
 
+  if (!queues_empty()) {
+    return false;
+  }
+
   printk("test_max Success!\n");
   return true;
 }
 
 /* Test unbounded number of pages.
  * Note: __handle_page_fault is dealing with newpage and freeframe management
- * WARNING: This function leaks like a sieve (probably 2n pages) 
+ * WARNING: This function leaks like a sieve (probably 2n pages)
  * WARNING: Since we're in the kernel, total memory is capped at 2MB. test_n works up
  * to about 512 pages in practice. If you really want to test larger, you can
  * modify mmap.c:pk_vm_init and set free_pages = mem_pages. This is probably
@@ -310,9 +346,13 @@ bool test_n(int n) {
   }
 
   /* Finish draining the new page queue in case the page fault handler didn't
-   * grab all of them (so we leave the PFA in a good state for subsequent 
+   * grab all of them (so we leave the PFA in a good state for subsequent
    * tests*/
   pfa_drain_newq();
+
+  //if (!queues_empty()) {
+  //  return false;
+  //}
 
   printk("Test_%d Success\n", n);
   return true;
@@ -335,7 +375,7 @@ bool test_inval(void)
 
   pgid_t pgid = pfa_evict_page((void*)page);
   pfa_publish_freeframe(paddr);
-  
+
   /* Touch it, should cause page fault */
   test_inval_vaddr = (uintptr_t)page;
   *page = 17;
@@ -346,9 +386,13 @@ bool test_inval(void)
   }
 
   /* Finish draining the new page queue in case the page fault handler didn't
-   * grab all of them (so we leave the PFA in a good state for subsequent 
+   * grab all of them (so we leave the PFA in a good state for subsequent
    * tests*/
   pfa_drain_newq();
+
+  if (!queues_empty()) {
+    return false;
+  }
 
   printk("test_inval success\n");
   return true;
@@ -386,7 +430,7 @@ bool test_repeat(void)
     printk("Newpage (%d) doesn't match fetched page (%d)\n", newpage, pgid);
     return false;
   }
- 
+
   pte_t newpte = *walk((uintptr_t)page);
   if(pte_is_remote(newpte)) {
     printk("PTE Still marked remote!\n");
@@ -426,6 +470,10 @@ bool test_repeat(void)
   newpage = pfa_pop_newpage();
   if(newpage != pgid) {
     printk("Second fetch returned wrong ID\n");
+    return false;
+  }
+
+  if (!queues_empty()) {
     return false;
   }
 
@@ -486,6 +534,8 @@ static void rest_of_boot_loader(uintptr_t kstack_top)
   current.time0 = rdtime();
   current.cycle0 = rdcycle();
   current.instret0 = rdinstret();
+
+  printk("rest_of_boot_loader\n");
 
   int ret = main();
 

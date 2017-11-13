@@ -36,9 +36,9 @@ pgid_t pfa_evict_page(void const *page)
   uint64_t evict_val = paddr >> RISCV_PGSHIFT;
   assert(evict_val >> 36 == 0);
   assert(pgid >> 28 == 0);
-  evict_val |= (uint64_t)pgid << 36; 
+  evict_val |= (uint64_t)pgid << 36;
   *PFA_EVICTPAGE = evict_val;
-  
+
   pte_t *page_pte = walk((uintptr_t) page);
   /* At the moment, the page_id is just the page-aligned vaddr */
   *page_pte = pfa_mk_remote_pte(pgid, *page_pte);
@@ -100,4 +100,19 @@ pte_t pfa_mk_remote_pte(uint64_t page_id, pte_t orig_pte)
   rem_pte |= PFA_REMOTE;
 
   return rem_pte;
+}
+
+inline bool pfa_is_newqueue_empty(void)
+{
+  return *PFA_NEWSTAT == 0;
+}
+
+inline bool pfa_is_evictqueue_empty(void)
+{
+  return *PFA_EVICTSTAT == PFA_EVICT_MAX;
+}
+
+inline bool pfa_is_freequeue_empty(void)
+{
+  return *PFA_FREESTAT == PFA_FREE_MAX;
 }
