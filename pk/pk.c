@@ -559,6 +559,7 @@ void boot_loader(uintptr_t dtb)
   set_csr(sstatus, SSTATUS_SUM);
 
   file_init();
+  printk("after file_init()\n");
   enter_supervisor_mode(rest_of_boot_loader, pk_vm_init(), 0);
 }
 

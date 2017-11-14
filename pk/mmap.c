@@ -26,7 +26,7 @@ static uintptr_t first_free_page;
 static size_t next_free_page;
 static size_t free_pages;
 
-int demand_paging = 1; // unless -p flag is given
+int demand_paging; // unless -p flag is given
 
 static uintptr_t __page_alloc()
 {
@@ -439,6 +439,7 @@ void populate_mapping(const void* start, size_t size, int prot)
 
 uintptr_t pk_vm_init()
 {
+  demand_paging = 1;
   // HTIF address signedness and va2pa macro both cap memory size to 2 GiB
   mem_size = MIN(mem_size, 1U << 31);
   size_t mem_pages = mem_size >> RISCV_PGSHIFT;
