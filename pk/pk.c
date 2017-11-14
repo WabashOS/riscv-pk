@@ -137,7 +137,7 @@ bool test_read_allbytes()
   /* fetch */
   for (int i = 0; i < 4096; i++) {
     if (p0[i] != i % 255) {
-      printk("p0[%d] didn't match expected =%d\n", i, i % 255);
+      printk("p0[%d]=%d didn't match expected =%d\n", i, p0[i], i % 255);
       return false;
     }
   }
@@ -200,6 +200,9 @@ bool test_two()
   pgid_t i1 = pfa_evict_page(p1);
   pfa_publish_freeframe(f0);
   pfa_publish_freeframe(f1);
+
+  if(!pfa_poll_evict())
+    return false;
 
   /* Values */
   uint8_t v0_after, v1_after;
@@ -375,6 +378,9 @@ bool test_inval(void)
 
   pgid_t pgid = pfa_evict_page((void*)page);
   pfa_publish_freeframe(paddr);
+
+  if(!pfa_poll_evict())
+    return false;
 
   /* Touch it, should cause page fault */
   test_inval_vaddr = (uintptr_t)page;
@@ -559,7 +565,6 @@ void boot_loader(uintptr_t dtb)
   set_csr(sstatus, SSTATUS_SUM);
 
   file_init();
-  printk("after file_init()\n");
   enter_supervisor_mode(rest_of_boot_loader, pk_vm_init(), 0);
 }
 
