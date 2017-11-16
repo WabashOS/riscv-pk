@@ -505,10 +505,13 @@ bool test_fetch_while_evicting() {
   char *y = (char *) page_alloc();
 
   y[10] = 33;
+  x[10] = 3;
 
   pfa_evict_page((void*) y);
   if(!pfa_poll_evict())
     return false;
+
+  pfa_publish_freeframe(va2pa(y));
 
   pfa_evict_page((void*) x);
   if (y[10] != 33) {
@@ -517,6 +520,15 @@ bool test_fetch_while_evicting() {
 
   if(!pfa_poll_evict())
     return false;
+
+  pfa_publish_freeframe(va2pa(x));
+
+  if (x[10] != 3) {
+    printk("x[10] != 3\n");
+  }
+
+  pfa_pop_newpage();
+  pfa_pop_newpage();
 
   if (!queues_empty()) {
     return false;
