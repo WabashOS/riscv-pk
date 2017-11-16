@@ -348,7 +348,7 @@ bool test_n(int n) {
 
     /* Touch all the stuff we just evicted */
     for(int i = 0; i < local_n; i++) {
-      printk("pages[i] = %p\n", pages[i]);
+      printk("pages[%d] = %p\n", i, pages[i]);
       if(!page_cmp(pages[i], i)) {
         printk("Unexpected value in page %d: %d\n", i, *(uint8_t*)pages[i]);
         return false;
@@ -548,12 +548,24 @@ bool test_fetch_while_evicting() {
   pfa_pop_newpage();
   pfa_pop_newpage();
 
-  if (!queues_empty()) {
-    return false;
+  bool ret = true;
+  if (!pfa_is_newqueue_empty()) {
+    printk("new queue is not empty\n");
+    ret = false;
   }
 
-  printk("test_fetch_while_evicting Success\n");
-  return true;
+  if (!pfa_is_evictqueue_empty()) {
+    printk("evict queue is not empty\n");
+    ret = false;
+  }
+
+  if(ret) {
+    printk("test_fetch_while_evicting Success\n");
+    return true; 
+  } else {
+    printk("test_fetch_while_evicting Failure\n");
+    return false;
+  }
 }
 
 int main()
