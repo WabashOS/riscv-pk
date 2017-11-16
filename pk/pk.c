@@ -487,6 +487,45 @@ bool test_repeat(void)
   return true;
 }
 
+/*  allocate page X, Y
+    evict page Y
+    poll for evict completion
+    evict page X
+    immediately access Y (fetch triggers)
+    page fault will occurr because an eviction is in progress
+    page fault handler will notice evict queue is not empty, will poll
+    page fault handler returns when eviction is done
+    cpu retries access, succeds because pfa is now ready for fetch
+    poll for eviction on X (not really needed)
+*/
+bool test_fetch_while_evicting() {
+  printk("test_fetch_while_evicting\n");
+
+  char *x = (char *) page_alloc();
+  char *y = (char *) page_alloc();
+
+  y[10] = 33;
+
+  pfa_evict_page((void*) y);
+  if(!pfa_poll_evict())
+    return false;
+
+  pfa_evict_page((void*) x);
+  if (y[10] != 33) {
+    printk("y[10] != 33\n");
+  }
+
+  if(!pfa_poll_evict())
+    return false;
+
+  if (!queues_empty()) {
+    return false;
+  }
+
+  printk("test_fetch_while_evicting Success\n");
+  return true;
+}
+
 int main()
 {
   pfa_init();
@@ -522,6 +561,11 @@ int main()
   }
 
   if(!test_repeat()) {
+    printk("Test Failure\n");
+    return EXIT_FAILURE;
+  }
+
+  if(!test_fetch_while_evicting()) {
     printk("Test Failure\n");
     return EXIT_FAILURE;
   }

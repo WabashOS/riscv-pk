@@ -209,6 +209,12 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
       return -1;
     }
 
+    if (!pfa_is_evictqueue_empty()) {
+      printk("waiting for evict queue to be empty\n");
+      if (!pfa_poll_evict())
+        printk("error polling for eviction\n");
+    }
+
     flush_tlb();
     return 0;
   }
@@ -363,7 +369,7 @@ uintptr_t do_brk(size_t addr)
   spinlock_lock(&vm_lock);
     addr = __do_brk(addr);
   spinlock_unlock(&vm_lock);
-  
+
   return addr;
 }
 
@@ -386,7 +392,7 @@ uintptr_t do_mprotect(uintptr_t addr, size_t length, int prot)
         res = -ENOMEM;
         break;
       }
-  
+
       if (!(*pte & PTE_V)) {
         vmr_t* v = (vmr_t*)*pte;
         if((v->prot ^ prot) & ~v->prot){
