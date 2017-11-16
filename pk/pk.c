@@ -197,7 +197,13 @@ bool test_two()
 
   /* pg IDs (i*) */
   pgid_t i0 = pfa_evict_page(p0);
+  if(!pfa_poll_evict())
+    return false;
+
   pgid_t i1 = pfa_evict_page(p1);
+  if(!pfa_poll_evict())
+    return false;
+
   pfa_publish_freeframe(f0);
   pfa_publish_freeframe(f1);
 
@@ -281,6 +287,8 @@ bool test_max(void)
     memset(pages[i], i, RISCV_PGSIZE);
     uintptr_t paddr = va2pa(pages[i]);
     ids[i] = pfa_evict_page(pages[i]);
+    if(!pfa_poll_evict())
+      return false;
     pfa_publish_freeframe(paddr);
   }
 
@@ -334,6 +342,8 @@ bool test_n(int n) {
       pages[i] = (void*)page_alloc();
       memset(pages[i], i, RISCV_PGSIZE);
       pfa_evict_page(pages[i]);
+      if(!pfa_poll_evict())
+        return false;
     }
 
     /* Touch all the stuff we just evicted */
@@ -377,6 +387,8 @@ bool test_inval(void)
   flush_tlb();
 
   pgid_t pgid = pfa_evict_page((void*)page);
+  if(!pfa_poll_evict())
+    return false;
   pfa_publish_freeframe(paddr);
 
   if(!pfa_poll_evict())
@@ -503,6 +515,12 @@ bool test_fetch_while_evicting() {
 
   char *x = (char *) page_alloc();
   char *y = (char *) page_alloc();
+  if(!x || !y) {
+    printk("Failed to allocate pages\n");
+    return false;
+  }
+  uintptr_t x_paddr = va2pa(x);
+  uintptr_t y_paddr = va2pa(y);
 
   y[10] = 33;
   x[10] = 3;
@@ -511,7 +529,7 @@ bool test_fetch_while_evicting() {
   if(!pfa_poll_evict())
     return false;
 
-  pfa_publish_freeframe(va2pa(y));
+  pfa_publish_freeframe(y_paddr);
 
   pfa_evict_page((void*) x);
   if (y[10] != 33) {
@@ -521,7 +539,7 @@ bool test_fetch_while_evicting() {
   if(!pfa_poll_evict())
     return false;
 
-  pfa_publish_freeframe(va2pa(x));
+  pfa_publish_freeframe(x_paddr);
 
   if (x[10] != 3) {
     printk("x[10] != 3\n");
