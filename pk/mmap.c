@@ -180,7 +180,10 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
 
   /* Check for remote pages, signifies the PFA requested help */
   if (pte && pte_is_remote(*pte)) {
-    printk("handle_page_fault: pte is remote\n");
+    printk("handle_page_fault: pte is remote: freeframes=%d, newpages=%d\n",
+        pfa_check_freeframes(),
+        pfa_check_newpage());
+
     /* Fill the free frame queue */
     uint64_t nfree_needed = pfa_check_freeframes();
     while(nfree_needed) {
