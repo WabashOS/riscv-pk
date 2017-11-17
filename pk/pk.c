@@ -548,14 +548,11 @@ bool test_fetch_while_evicting() {
   pfa_pop_newpage();
   pfa_pop_newpage();
 
+  bool ret = true;
+
   if (!pfa_is_newqueue_empty()) {
     printk("new queue is not empty\n");
-    return false;
-  }
-
-  if (!pfa_is_evictqueue_empty()) {
-    printk("evict queue is not empty\n");
-    return false;
+    ret = false;
   }
 
   if (!pfa_is_evictqueue_empty()) {
