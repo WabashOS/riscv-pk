@@ -8,11 +8,6 @@ void pfa_init()
   // create virtual mapping for PFA I/O area
   __map_kernel_range(PFA_BASE, PFA_BASE, RISCV_PGSIZE, PROT_READ|PROT_WRITE|PROT_EXEC);
 
-  /* Provide scratch page for PFA */
-  void *pfa_scratch = (void*)page_alloc();
-  uintptr_t paddr = va2pa(pfa_scratch);
-  *PFA_INITMEM = paddr;
-
   return;
 }
 

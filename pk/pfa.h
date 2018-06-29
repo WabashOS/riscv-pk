@@ -15,10 +15,9 @@
 #define PFA_NEWPGID        ((volatile uint64_t*)(PFA_BASE + 32))
 #define PFA_NEWVADDR       ((volatile uint64_t*)(PFA_BASE + 40))
 #define PFA_NEWSTAT        ((volatile uint64_t*)(PFA_BASE + 48))
-#define PFA_INITMEM        ((volatile uint64_t*)(PFA_BASE + 56))
 
 /* PFA Limits (implementation-specific) */
-#define PFA_QUEUES_SIZE 10
+#define PFA_QUEUES_SIZE 64 
 #define PFA_FREE_MAX (PFA_QUEUES_SIZE)
 #define PFA_NEW_MAX  (PFA_QUEUES_SIZE)
 #define PFA_EVICT_MAX (PFA_QUEUES_SIZE)
