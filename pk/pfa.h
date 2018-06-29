@@ -15,6 +15,7 @@
 #define PFA_NEWPGID        ((volatile uint64_t*)(PFA_BASE + 32))
 #define PFA_NEWVADDR       ((volatile uint64_t*)(PFA_BASE + 40))
 #define PFA_NEWSTAT        ((volatile uint64_t*)(PFA_BASE + 48))
+#define PFA_DSTMAC         ((volatile uint64_t*)(PFA_BASE + 56))
 
 /* PFA Limits (implementation-specific) */
 #define PFA_QUEUES_SIZE 64 
@@ -35,6 +36,7 @@
 
 /* Page ID */
 #define PFA_PGID_BITS 28
+#define PFA_INIT_PGID 0 //Page IDs will start at this value and go up
 typedef uint32_t pgid_t;
 
 /* Turn a regular pte into a remote pte with page_id */

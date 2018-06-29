@@ -1,13 +1,19 @@
 #include "pfa.h"
+#include "nic.h"
 #include "frontend.h"
 
 void pfa_init()
 {
   printk("Initializing PFA\n");
-
   // create virtual mapping for PFA I/O area
   __map_kernel_range(PFA_BASE, PFA_BASE, RISCV_PGSIZE, PROT_READ|PROT_WRITE|PROT_EXEC);
 
+  printk("Getting MAC from NIC for loopback config\n");
+  __map_kernel_range(NIC_BASE, NIC_BASE, RISCV_PGSIZE, PROT_READ|PROT_WRITE|PROT_EXEC);
+  uint64_t mac = *NIC_MACADDR;
+
+  printk("setting mac in PFA\n");
+  *PFA_DSTMAC = mac;
   return;
 }
 
@@ -23,7 +29,7 @@ void pfa_publish_freeframe(uintptr_t paddr)
 
 pgid_t pfa_evict_page(void const *page)
 {
-  static pgid_t pgid = 0;
+  static pgid_t pgid = PFA_INIT_PGID;
   uintptr_t paddr = va2pa(page);
 
   /* pfn goes in first 36bits, pgid goes in upper 28
@@ -35,7 +41,6 @@ pgid_t pfa_evict_page(void const *page)
   *PFA_EVICTPAGE = evict_val;
 
   pte_t *page_pte = walk((uintptr_t) page);
-  /* At the moment, the page_id is just the page-aligned vaddr */
   *page_pte = pfa_mk_remote_pte(pgid, *page_pte);
   flush_tlb();
 
