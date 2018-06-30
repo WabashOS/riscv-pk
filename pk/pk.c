@@ -295,7 +295,6 @@ bool test_max(void)
   /* Access pages in reverse order to make sure each page ends up in a
    * different physical frame */
   for(int i = PFA_FREE_MAX - 1; i >= 0; i--) {
-
     if(!page_cmp(pages[i], i)) {
       printk("Unexpected value in page %d: %d\n", i, *(uint8_t*)pages[i]);
       return false;
@@ -582,7 +581,7 @@ bool test_evict_largepgid() {
   x[10] = 3;
 
   // manually evict page because we need to set pageid
-  pgid_t pgid = (1 << 28) - 1; // max pageid
+  pgid_t pgid = PFA_MAX_PGID;
   uint64_t evict_val = x_paddr >> RISCV_PGSHIFT;
   assert(evict_val >> 36 == 0);
   assert(pgid >> 28 == 0);
@@ -606,7 +605,7 @@ bool test_evict_largepgid() {
 
   pgid = pfa_pop_newpage();
 
-  if (pgid != (1 << 28) - 1) {
+  if (pgid != PFA_MAX_PGID) {
     printk("pageid is not correct: %lx\n", pgid);
     return false;
   }

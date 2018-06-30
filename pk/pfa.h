@@ -37,6 +37,7 @@
 /* Page ID */
 #define PFA_PGID_BITS 28
 #define PFA_INIT_PGID 0 //Page IDs will start at this value and go up
+#define PFA_MAX_PGID ((1 << PFA_PGID_BITS) - 1)
 typedef uint32_t pgid_t;
 
 /* Turn a regular pte into a remote pte with page_id */
