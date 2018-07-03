@@ -34,8 +34,8 @@
 #define pfa_pgid_sw(PGID) (PGID >> PFA_PAGEID_RPN_BITS)
 
 /* Magic number used in the software reserved bits of the pgid for testing */
-#define PFA_PAGEID_SW_MAGIC 0xCAFEl
-// #define PFA_PAGEID_SW_MAGIC 0x0l
+// #define PFA_PAGEID_SW_MAGIC 0xCAFEl
+#define PFA_PAGEID_SW_MAGIC 0x0l
 
 #define pte_is_remote(pte) (!(pte & PTE_V) && (pte & PFA_REMOTE))
 
