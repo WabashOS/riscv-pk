@@ -682,6 +682,11 @@ int main()
     return EXIT_FAILURE;
   }
 
+  if(!test_n(512)) { // takes about 2m cycles
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
   printk("Test Success!\n");
   return EXIT_SUCCESS;
 }
