@@ -29,7 +29,7 @@ void pfa_publish_freeframe(uintptr_t paddr)
 
 pgid_t pfa_evict_page(void const *page)
 {
-  static pgid_t pgid = PFA_INIT_PGID;
+  static pgid_t pgid = PFA_INIT_RPN;
   uintptr_t paddr = va2pa(page);
 
   /* pfn goes in first 36bits, pgid goes in upper 28
@@ -65,7 +65,10 @@ pgid_t pfa_pop_newpage()
 {
   /*XXX Discard the vaddr for now */
   volatile uint64_t vaddr = *PFA_NEWVADDR;
-  return (pgid_t)(*PFA_NEWPGID);
+  pgid_t pgid = (pgid_t)(*PFA_NEWPGID);
+
+  assert(pfa_pgid_sw(pgid) == PFA_PAGEID_SW_MAGIC);
+  return pfa_pgid_rpn(pgid);
 }
 
 uint64_t pfa_check_newpage()
@@ -84,16 +87,18 @@ void pfa_drain_newq(void)
   return;
 }
 
-pte_t pfa_mk_remote_pte(uint64_t page_id, pte_t orig_pte)
+pte_t pfa_mk_remote_pte(uint64_t rpn, pte_t orig_pte)
 {
   pte_t rem_pte;
 
-  /* page_id needs must fit in upper bits of PTE */
-  assert(page_id >> (64 - PFA_PAGEID_SHIFT) == 0);
+  /* rpn needs must fit in upper bits of PTE */
+  assert(rpn >> (PFA_PAGEID_RPN_BITS) == 0);
 
 
   /* Page ID */
-  rem_pte = page_id << PFA_PAGEID_SHIFT;
+  rem_pte = rpn << PFA_PAGEID_SHIFT;
+  rem_pte |= PFA_PAGEID_SW_MAGIC << (PFA_PAGEID_SHIFT + PFA_PAGEID_RPN_BITS);
+
   /* Protection Bits */
   rem_pte |= (orig_pte & ~(-1 << PTE_PPN_SHIFT)) << PFA_PROT_SHIFT;
   /* Valid and Remote Flags */

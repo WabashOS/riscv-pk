@@ -569,62 +569,6 @@ bool test_fetch_while_evicting() {
   }
 }
 
-bool test_evict_largepgid() {
-  printk("test_evict_largepgid\n");
-
-  char *x = (char *) page_alloc();
-  if(!x) {
-    printk("Failed to allocate pages\n");
-    return false;
-  }
-  uintptr_t x_paddr = va2pa(x);
-
-  x[10] = 3;
-
-  // manually evict page because we need to set pageid
-  pgid_t pgid = (1 << 28) - 1; // max pageid
-  uint64_t evict_val = x_paddr >> RISCV_PGSHIFT;
-  assert(evict_val >> 36 == 0);
-  assert(pgid >> 28 == 0);
-  evict_val |= (uint64_t)pgid << 36;
-  *PFA_EVICTPAGE = evict_val;
-  pte_t *page_pte = walk((uintptr_t) x);
-  *page_pte = pfa_mk_remote_pte(pgid, *page_pte);
-  flush_tlb();
-
-  printk("remote pte %lx\n", *page_pte);
-
-  if(!pfa_poll_evict())
-    return false;
-
-  pfa_publish_freeframe(x_paddr);
-
-  if (x[10] != 3) {
-    printk("x[10] != 3\n");
-    return false;
-  }
-
-  pgid = pfa_pop_newpage();
-
-  if (pgid != (1 << 28) - 1) {
-    printk("pageid is not correct: %lx\n", pgid);
-    return false;
-  }
-
-  if (!pfa_is_newqueue_empty()) {
-    printk("new queue is not empty\n");
-    return false;
-  }
-
-  if (!pfa_is_evictqueue_empty()) {
-    printk("evict queue is not empty\n");
-    return false;
-  }
-
-  printk("test_evict_largepgid Success\n");
-  return true;
-}
-
 int main()
 {
   pfa_init();
@@ -670,11 +614,6 @@ int main()
   }
 
   if(!test_n(32)) { // takes about 2m cycles
-    printk("Test Failure!\n");
-    return EXIT_FAILURE;
-  }
-
-  if(!test_evict_largepgid()) {
     printk("Test Failure!\n");
     return EXIT_FAILURE;
   }

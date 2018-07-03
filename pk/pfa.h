@@ -24,23 +24,31 @@
 #define PFA_EVICT_MAX (PFA_QUEUES_SIZE)
 
 /* PFA PTE Bits */
-#define PFA_PAGEID_SHIFT 12
-#define PFA_PROT_SHIFT   2
-#define PFA_REMOTE       0x2
+#define PFA_PAGEID_SHIFT     12
+#define PFA_PAGEID_RPN_BITS  28 /* size of remote page number part of pgid */
+#define PFA_PAGEID_SW_BITS   24 /* size of SW reserved part of pgid */
+#define PFA_PROT_SHIFT       2
+#define PFA_REMOTE           0x2
+
+#define pfa_pgid_rpn(PGID) (PGID & ((1 << PFA_PAGEID_RPN_BITS) - 1))
+#define pfa_pgid_sw(PGID) (PGID >> PFA_PAGEID_RPN_BITS)
+
+/* Magic number used in the software reserved bits of the pgid for testing */
+#define PFA_PAGEID_SW_MAGIC 0xCAFEl
 
 #define pte_is_remote(pte) (!(pte & PTE_V) && (pte & PFA_REMOTE))
+
 
 /* Max time to poll for completion for PFA stuff. Assume that the device is
  * broken if you have to poll this many times. Currently very conservative. */
 #define MAX_POLL_ITER 1024*1024
 
 /* Page ID */
-#define PFA_PGID_BITS 28
-#define PFA_INIT_PGID 0 //Page IDs will start at this value and go up
-typedef uint32_t pgid_t;
+#define PFA_INIT_RPN 4 //Remote page numbers will start at this value and go up
+typedef uint64_t pgid_t;
 
 /* Turn a regular pte into a remote pte with page_id */
-pte_t pfa_mk_remote_pte(uint64_t page_id, pte_t orig_pte);
+pte_t pfa_mk_remote_pte(pgid_t page_id, pte_t orig_pte);
 
 void pfa_init(void);
 uint64_t pfa_check_freeframes(void);
