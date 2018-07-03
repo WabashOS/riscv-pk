@@ -30,6 +30,14 @@ void pfa_publish_freeframe(uintptr_t paddr)
 pgid_t pfa_evict_page(void const *page)
 {
   static pgid_t pgid = PFA_INIT_RPN;
+  
+  pfa_evict_page_pgid(page, pgid);
+
+  return pgid++;
+}
+
+void pfa_evict_page_pgid(void const *page, pgid_t pgid)
+{
   uintptr_t paddr = va2pa(page);
 
   /* pfn goes in first 36bits, pgid goes in upper 28
@@ -43,8 +51,6 @@ pgid_t pfa_evict_page(void const *page)
   pte_t *page_pte = walk((uintptr_t) page);
   *page_pte = pfa_mk_remote_pte(pgid, *page_pte);
   flush_tlb();
-
-  return pgid++;
 }
 
 bool pfa_poll_evict(void)

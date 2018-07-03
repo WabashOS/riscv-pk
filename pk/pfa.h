@@ -35,6 +35,7 @@
 
 /* Magic number used in the software reserved bits of the pgid for testing */
 #define PFA_PAGEID_SW_MAGIC 0xCAFEl
+// #define PFA_PAGEID_SW_MAGIC 0x0l
 
 #define pte_is_remote(pte) (!(pte & PTE_V) && (pte & PFA_REMOTE))
 
@@ -44,8 +45,9 @@
 #define MAX_POLL_ITER 1024*1024
 
 /* Page ID */
-#define PFA_INIT_RPN 4 //Remote page numbers will start at this value and go up
 typedef uint64_t pgid_t;
+#define PFA_INIT_RPN 4 //Remote page numbers will start at this value and go up
+#define PFA_MAX_RPN ((1 << PFA_PAGEID_RPN_BITS) - 1)
 
 /* Turn a regular pte into a remote pte with page_id */
 pte_t pfa_mk_remote_pte(pgid_t page_id, pte_t orig_pte);
@@ -56,6 +58,7 @@ void pfa_publish_freeframe(uintptr_t paddr);
 
 /* Evict a page and return the pgid that was used for it.
  * Page ids increase monotonically */
+void pfa_evict_page_pgid(void const *page, pgid_t pgid);
 pgid_t pfa_evict_page(void const *page);
 
 /* Blocks (spin) until all pages in evictq are successfully evicted */
