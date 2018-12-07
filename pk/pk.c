@@ -12,6 +12,7 @@
 #include <stdlib.h>
 
 elf_info current;
+long disabled_hart_mask;
 
 bool queues_empty() {
   bool ret = true;
