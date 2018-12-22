@@ -47,7 +47,7 @@
 /* Page ID */
 typedef uint64_t pgid_t;
 #define PFA_INIT_RPN 4 //Remote page numbers will start at this value and go up
-#define PFA_MAX_RPN ((1 << PFA_PAGEID_RPN_BITS) - 1)
+#define PFA_MAX_RPN ((1 << 22) - 1)
 
 /* Turn a regular pte into a remote pte with page_id */
 pte_t pfa_mk_remote_pte(pgid_t page_id, pte_t orig_pte);

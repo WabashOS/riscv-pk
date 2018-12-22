@@ -8,12 +8,12 @@ void pfa_init()
   // create virtual mapping for PFA I/O area
   __map_kernel_range(PFA_BASE, PFA_BASE, RISCV_PGSIZE, PROT_READ|PROT_WRITE|PROT_EXEC);
 
-  printk("Getting MAC from NIC for loopback config\n");
+  printk("Getting MAC from NIC\n");
   __map_kernel_range(NIC_BASE, NIC_BASE, RISCV_PGSIZE, PROT_READ|PROT_WRITE|PROT_EXEC);
   uint64_t mac = *NIC_MACADDR;
 
   printk("setting mac in PFA\n");
-  *PFA_DSTMAC = mac;
+  *PFA_DSTMAC = mac + (1L << 40);
   return;
 }
 
