@@ -12,8 +12,9 @@ void pfa_init()
   __map_kernel_range(NIC_BASE, NIC_BASE, RISCV_PGSIZE, PROT_READ|PROT_WRITE|PROT_EXEC);
   uint64_t mac = *NIC_MACADDR;
 
-  printk("setting mac in PFA\n");
-  *PFA_DSTMAC = mac + (1L << 40);
+  uint64_t dst_mac = mac + (1L << 40);
+  printk("setting mac in PFA to: %ld\n", dst_mac);
+  *PFA_DSTMAC = dst_mac;
   return;
 }
 
