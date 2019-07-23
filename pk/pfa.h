@@ -49,6 +49,20 @@ typedef uint64_t pgid_t;
 #define PFA_INIT_RPN 4 //Remote page numbers will start at this value and go up
 #define PFA_MAX_RPN ((1 << 22) - 1)
 
+/* Info for a page that will be made remote */
+typedef struct rem_pg {
+  /* The value stored in the page */
+  uint64_t  val;
+  /* Pointer to the page in local mem */
+  uint64_t  *ptr;
+
+  /* Virtual and physical addresses */
+  uintptr_t vaddr;
+  uintptr_t paddr;
+
+  pgid_t pgid;
+} rem_pg_t;
+
 /* Turn a regular pte into a remote pte with page_id */
 pte_t pfa_mk_remote_pte(pgid_t page_id, pte_t orig_pte);
 
@@ -80,4 +94,12 @@ bool pfa_is_evictqueue_empty(void);
 
 bool pfa_is_freequeue_empty(void);
 
+void check_pfa_clean(void);
+
+/* rem_pg_t based functions. These automate more and should be used whenever
+ * possible. Lower-level functions should be used only when needed for the test */
+void alloc_rem_pg(rem_pg_t *pg);
+void evict_full_rem_pg(rem_pg_t *pg);
+void fetch_rem_pg(rem_pg_t *pg);
+void pop_new_rem_pg(rem_pg_t *pg);
 #endif

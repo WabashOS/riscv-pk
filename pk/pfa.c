@@ -128,3 +128,60 @@ inline bool pfa_is_freequeue_empty(void)
 {
   return *PFA_FREESTAT == PFA_FREE_MAX;
 }
+
+void alloc_rem_pg(rem_pg_t *pg)
+{
+  static uint64_t pg_val = 10;
+
+  pg->val = pg_val++;
+
+  pg->ptr = (uint64_t *)page_alloc();
+  assert(pg->ptr);
+
+  for(int i = 0; i < 4096 / sizeof(uint64_t); i++) {
+    pg->ptr[i] = pg->val;
+  }
+
+  pg->vaddr = (uintptr_t)pg->ptr;
+  pg->paddr = va2pa(pg->ptr);
+  pg->pgid = 0;
+}
+
+/* Does a 'normal' eviction including polling for completion and providing the
+ * free frame */
+void evict_full_rem_pg(rem_pg_t *pg)
+{
+  pg->pgid = pfa_evict_page((void*)pg->ptr);
+  if(!pfa_poll_evict()) {
+    printk("Failed to evict page: %p\n", pg->ptr);
+    assert(0);
+  }
+
+  pfa_publish_freeframe(pg->paddr);
+}
+
+void fetch_rem_pg(rem_pg_t *pg)
+{
+  /* Trigger the fault explicitly for clarity */
+  uint64_t x = pg->ptr[0];
+
+  for(int i = 0; i < 4096 / sizeof(uint64_t); i++) {
+    assert(pg->ptr[i] == pg->val);
+  }
+}
+
+void pop_new_rem_pg(rem_pg_t *pg)
+{
+  uintptr_t vaddr = *PFA_NEWVADDR;
+  assert(vaddr == pg->vaddr);
+  pgid_t pgid = (pgid_t)(*PFA_NEWPGID);
+  assert(pgid == pg->pgid);
+}
+
+/* Make sure the PFA is clean and empty. */
+void check_pfa_clean(void)
+{
+  assert(pfa_is_newqueue_empty());
+  assert(pfa_is_evictqueue_empty());
+  assert(pfa_is_freequeue_empty());
+}

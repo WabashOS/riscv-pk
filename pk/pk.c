@@ -46,11 +46,13 @@ bool test_one(bool flush)
   /* we use index 10 to make sure the PFA works even with unaligned accesses */
   page[10] = 17;
 
+  printk("Evicting\n");
   pgid_t pgid = pfa_evict_page((void*)page);
   if(flush) {
     flush_tlb();
   }
 
+  printk("Polling for eviction\n");
   if(!pfa_poll_evict())
     return false;
 
@@ -58,23 +60,27 @@ bool test_one(bool flush)
     flush_tlb();
   }
 
+  printk("Pushing free frame\n");
   pfa_publish_freeframe(paddr);
   if(flush) {
     flush_tlb();
   }
 
   /* Force rmem fault */
+  printk("Bringing in page\n");
   page[10] = 42;
   if(flush) {
     flush_tlb();
   }
 
+  printk("Checking newstat\n");
   uint64_t nnew = pfa_check_newpage();
   if(nnew != 1) {
     printk("New page queue reporting wrong number of new pages: %ld\n", nnew);
     return false;
   }
 
+  printk("Draining newq\n");
   pgid_t newpage = pfa_pop_newpage();
   if(newpage != pgid) {
     printk("Newpage id (%d) doesn't match fetched page (%d)\n", newpage, pgid);
@@ -84,6 +90,7 @@ bool test_one(bool flush)
     flush_tlb();
   }
 
+  printk("Double checking page tables and page values\n");
   pte_t newpte = *walk((uintptr_t)page);
   if(pte_is_remote(newpte)) {
     printk("PTE Still marked remote!\n");
@@ -510,128 +517,122 @@ bool test_repeat(void)
     cpu retries access, succeds because pfa is now ready for fetch
     poll for eviction on X (not really needed)
 */
-bool test_fetch_while_evicting() {
+bool test_fetch_while_evicting()
+{
   printk("test_fetch_while_evicting\n");
+  rem_pg_t pgs[2];
 
-  char *x = (char *) page_alloc();
-  char *y = (char *) page_alloc();
-  if(!x || !y) {
-    printk("Failed to allocate pages\n");
-    return false;
-  }
-  uintptr_t x_paddr = va2pa(x);
-  uintptr_t y_paddr = va2pa(y);
+  alloc_rem_pg(&pgs[0]); 
+  alloc_rem_pg(&pgs[1]); 
 
-  y[10] = 33;
-  x[10] = 3;
+  // evict 1 normally
+  evict_full_rem_pg(&pgs[0]);
 
-  pfa_evict_page((void*) y);
+  // partially evict 1
+  pgs[1].pgid = pfa_evict_page(pgs[1].ptr);
+
+  // fetch 0 while evicting 1
+  fetch_rem_pg(&pgs[0]);
+
+  // finish evicting 1
   if(!pfa_poll_evict())
     return false;
+  pfa_publish_freeframe(pgs[1].paddr); 
 
-  pfa_publish_freeframe(y_paddr);
+  fetch_rem_pg(&pgs[1]);
+  
+  pop_new_rem_pg(&pgs[0]);
+  pop_new_rem_pg(&pgs[1]);
 
-  pfa_evict_page((void*) x);
-  if (y[10] != 33) {
-    printk("y[10] != 33\n");
-  }
-
-  if(!pfa_poll_evict())
-    return false;
-
-  pfa_publish_freeframe(x_paddr);
-
-  if (x[10] != 3) {
-    printk("x[10] != 3\n");
-  }
-
-  pfa_pop_newpage();
-  pfa_pop_newpage();
-
-  bool ret = true;
-
-  if (!pfa_is_newqueue_empty()) {
-    printk("new queue is not empty\n");
-    ret = false;
-  }
-
-  if (!pfa_is_evictqueue_empty()) {
-    printk("evict queue is not empty\n");
-    ret = false;
-  }
-
-  if(ret) {
-    printk("test_fetch_while_evicting Success\n");
-    return true;
-  } else {
-    printk("test_fetch_while_evicting Failure\n");
-    return false;
-  }
+  check_pfa_clean();
+  return true;
 }
 
-bool test_evict_largepgid() {
+bool test_evict_largepgid()
+{
+  rem_pg_t pg;
+
   printk("test_evict_largepgid\n");
 
-  char *x = (char *) page_alloc();
-  if(!x) {
-    printk("Failed to allocate pages\n");
-    return false;
-  }
-  uintptr_t x_paddr = va2pa(x);
-
-  x[10] = 3;
-
+  alloc_rem_pg(&pg);
+  
   // manually evict page because we need to set pageid
   // Note that we don't set a SWRES for this test
-  pgid_t pgid = PFA_MAX_RPN;
-  pfa_evict_page_pgid((void*)x, pgid);
-  /* uint64_t evict_val = x_paddr >> RISCV_PGSHIFT; */
-  /* assert(evict_val >> 36 == 0); */
-  /* assert(pgid >> 28 == 0); */
-  /* evict_val |= (uint64_t)pgid << 36; */
-  /* *PFA_EVICTPAGE = evict_val; */
-  /* pte_t *page_pte = walk((uintptr_t) x); */
-  /* *page_pte = pfa_mk_remote_pte(pgid, *page_pte); */
-  /* flush_tlb(); */
-  /*  */
-  /* printk("remote pte %lx\n", *page_pte); */
-
+  pg.pgid = PFA_MAX_RPN;
+  pfa_evict_page_pgid(pg.ptr, pg.pgid);
   if(!pfa_poll_evict())
     return false;
+  pfa_publish_freeframe(pg.paddr);
 
-  pfa_publish_freeframe(x_paddr);
+  fetch_rem_pg(&pg);
+  pop_new_rem_pg(&pg);
+  check_pfa_clean();
 
-  if (x[10] != 3) {
-    printk("x[10] != 3\n");
-    return false;
-  }
+  return true;
+}
 
-  /* volatile uint64_t vaddr = *PFA_NEWVADDR; */
-  /* pgid = (pgid_t)(*PFA_NEWPGID); */
-  pgid = pfa_pop_newpage();
+bool test_interleaved_newq()
+{
+  printk("test_interleaved_newq\n");
+  rem_pg_t pgs[2];
+  volatile pgid_t pgid;
+  volatile uint64_t vaddr;
 
-  if (pgid != PFA_MAX_RPN) {
-    printk("pageid is not correct: %lx\n", pgid);
-    return false;
-  }
+  alloc_rem_pg(&pgs[0]);
+  alloc_rem_pg(&pgs[1]);
 
-  if (!pfa_is_newqueue_empty()) {
-    printk("new queue is not empty\n");
-    return false;
-  }
+  printk("test_interleaved_newq vaddr then pgid\n");
+  evict_full_rem_pg(&pgs[0]);
+  evict_full_rem_pg(&pgs[1]);
 
-  if (!pfa_is_evictqueue_empty()) {
-    printk("evict queue is not empty\n");
-    return false;
-  }
+  fetch_rem_pg(&pgs[0]);
 
-  printk("test_evict_largepgid Success\n");
+  /* Partially drain newq (vaddr first)*/
+  vaddr = *PFA_NEWVADDR;
+  assert(vaddr == pgs[0].vaddr);
+
+  fetch_rem_pg(&pgs[1]);
+
+  /* Finish draining newq, this should be pgs[0] pgid */
+  pgid = (pgid_t)(*PFA_NEWPGID);
+  assert(pgid == pgs[0].pgid);
+
+  pop_new_rem_pg(&pgs[1]);
+
+  check_pfa_clean();
+
+
+  printk("test_interleaved_newq pgid then vaddr\n");
+  evict_full_rem_pg(&pgs[0]);
+  evict_full_rem_pg(&pgs[1]);
+
+  fetch_rem_pg(&pgs[0]);
+
+  /* Partially drain newq */
+  pgid = (pgid_t)(*PFA_NEWPGID);
+  assert(pgid == pgs[0].pgid);
+
+  fetch_rem_pg(&pgs[1]);
+
+  /* Finish draining newq, this should be pgs[0] pgid */
+  vaddr = *PFA_NEWVADDR;
+  assert(vaddr == pgs[0].vaddr);
+
+  pop_new_rem_pg(&pgs[1]);
+
+  check_pfa_clean();
+
   return true;
 }
 
 int main()
 {
   pfa_init();
+
+  if(!test_interleaved_newq()) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
 
   if(!test_one(false)) {
     printk("Test Failure!\n");
