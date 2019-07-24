@@ -370,9 +370,7 @@ bool test_n(int n) {
    * tests*/
   pfa_drain_newq();
 
-  //if (!queues_empty()) {
-  //  return false;
-  //}
+  check_pfa_clean();
 
   printk("Test_%d Success\n", n);
   return true;
@@ -629,11 +627,6 @@ int main()
 {
   pfa_init();
 
-  if(!test_interleaved_newq()) {
-    printk("Test Failure!\n");
-    return EXIT_FAILURE;
-  }
-
   if(!test_one(false)) {
     printk("Test Failure!\n");
     return EXIT_FAILURE;
@@ -688,6 +681,12 @@ int main()
     printk("Test Failure!\n");
     return EXIT_FAILURE;
   }
+
+  if(!test_interleaved_newq()) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
 
   printk("Test Success!\n");
   return EXIT_SUCCESS;
