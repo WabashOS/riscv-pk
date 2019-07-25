@@ -370,7 +370,7 @@ bool test_n(int n) {
    * tests*/
   pfa_drain_newq();
 
-  check_pfa_clean();
+  /* check_pfa_clean(); */
 
   printk("Test_%d Success\n", n);
   return true;
@@ -543,6 +543,8 @@ bool test_fetch_while_evicting()
   pop_new_rem_pg(&pgs[1]);
 
   check_pfa_clean();
+
+  printk("test_fetch_while_evicting success\n");
   return true;
 }
 
@@ -565,6 +567,8 @@ bool test_evict_largepgid()
   fetch_rem_pg(&pg);
   pop_new_rem_pg(&pg);
   check_pfa_clean();
+
+  printk("test_evict_largepgid success\n");
 
   return true;
 }
@@ -672,6 +676,11 @@ int main()
     return EXIT_FAILURE;
   }
 
+  if(!test_interleaved_newq()) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
   if(!test_n(32)) { // takes about 2m cycles
     printk("Test Failure!\n");
     return EXIT_FAILURE;
@@ -681,12 +690,6 @@ int main()
     printk("Test Failure!\n");
     return EXIT_FAILURE;
   }
-
-  if(!test_interleaved_newq()) {
-    printk("Test Failure!\n");
-    return EXIT_FAILURE;
-  }
-
 
   printk("Test Success!\n");
   return EXIT_SUCCESS;
