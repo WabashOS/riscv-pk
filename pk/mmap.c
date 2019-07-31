@@ -188,48 +188,105 @@ static int __handle_page_fault(uintptr_t vaddr, int prot)
         pfa_check_freeframes(),
         pfa_check_newpage());
 
-    /* Fill the free frame queue */
-    uint64_t nfree_needed = pfa_check_freeframes();
-    while(nfree_needed) {
-      void *pg = (void*)page_alloc();
-      /* We'll never get this vaddr back */
-      pfa_publish_freeframe(va2pa(pg));
-      nfree_needed--;
-    }
+    if(current_exp == PFA_EXP_TESTN) {
+      /* Fill the free frame queue */
+      uint64_t nfree_needed = pfa_check_freeframes();
+      /* We should never have more than test_n_nrem pages in the freeQ so that
+       * it ends up empty when the test is done */
+      if (test_n_nrem < PFA_FREE_MAX) {
+        nfree_needed = test_n_nrem - (PFA_FREE_MAX - nfree_needed);
+      }
 
-    /* Drain newpage queue (right now we don't validate the output)*/
-    pgid_t newpage;
-    uint64_t nnew = pfa_check_newpage();
-    if(nnew > PFA_NEW_MAX) {
-      printk("Unreasonable number of new pages reported: %ld\n", nnew);
+      while(nfree_needed) {
+        void *pg = (void*)page_alloc();
+        /* We'll never get this vaddr back */
+        pfa_publish_freeframe(va2pa(pg));
+        nfree_needed--;
+      }
+
+      /* Drain newpage queue (right now we don't validate the output)*/
+      pgid_t newpage;
+      uint64_t nnew = pfa_check_newpage();
+      if(nnew > PFA_NEW_MAX) {
+        printk("Unreasonable number of new pages reported: %ld\n", nnew);
+        return -1;
+      }
+
+      while(nnew) {
+        newpage = pfa_pop_newpage();
+        nnew--;
+      }
+
+      nnew = pfa_check_newpage();
+      if(nnew != 0) {
+        printk("NEW_STAT reporting %ld pages even though we drained it!\n", nnew);
+        return -1;
+      }
+
+      if (!pfa_is_evictqueue_empty()) {
+        printk("waiting for evict queue to be empty\n");
+        if (!pfa_poll_evict())
+          printk("error polling for eviction\n");
+      }
+
+      flush_tlb();
+      return 0;
+    } else if (current_exp == PFA_EXP_NEWVADDR_FAULT) {
+      printk("Fault handler for newvaddr_fault test\n");
+      /* The vaddr gets set in the test right before faulting. If this assert
+       * triggers, it means we got a fault too early. */
+      assert(test_vaddr != 0);
+      /* This would indicate a repeated fault (we drained the pgid queue and
+       * returned, but the PFA triggered a fault again */
+      assert(test_pgid == 0);
+      /* We pushed a frame right before faulting, there should be 1 in here */
+      assert(pfa_check_freeframes() == PFA_FREE_MAX - 1);
+
+      test_pgid = (pgid_t)(*PFA_NEWPGID);
+
+      /* The newq should be ballanced now and have room for one more fault */
+      assert(pfa_check_newpage() == PFA_NEW_MAX - 1);
+
+      /* The PFA should kick in now and bring in the page */
+      flush_tlb();
+      printk("Leaving fault handler\n");
+      return 0;
+    } else if (current_exp == PFA_EXP_NEWPGID_FAULT) {
+      printk("Fault handler for newpgid_fault test\n");
+      /* The pgid gets set in the test right before faulting. If this assert
+       * triggers, it means we got a fault too early. */
+      assert(test_pgid != 0);
+      /* This would indicate a repeated fault (we drained the pgid queue and
+       * returned, but the PFA triggered a fault again */
+      assert(test_vaddr == 0);
+      /* We pushed a frame right before faulting, there should be 1 in here */
+      assert(pfa_check_freeframes() == PFA_FREE_MAX - 1);
+
+      test_vaddr = (pgid_t)(*PFA_NEWVADDR);
+
+      /* The newq should be ballanced now and have room for one more fault */
+      assert(pfa_check_newpage() == PFA_NEW_MAX - 1);
+
+      /* The PFA should kick in now and bring in the page */
+      flush_tlb();
+      printk("Leaving fault handler\n");
+      return 0;
+    } else if (current_exp == PFA_EXP_EMPTYQ) {
+      assert(vaddr == test_vaddr);
+      assert(test_paddr != 0);
+      /* Map the page back to its original paddr (we never actually evicted it, just marked it remote) */
+      *pte = pte_create(test_paddr >> RISCV_PGSHIFT, prot_to_type(PROT_READ|PROT_WRITE, 0));
+      flush_tlb();
+      return 0;
+    }else {
+      printk("Saw page fault in unrecognized experiment\n");
       return -1;
     }
-
-    while(nnew) {
-      newpage = pfa_pop_newpage();
-      nnew--;
-    }
-
-    nnew = pfa_check_newpage();
-    if(nnew != 0) {
-      printk("NEW_STAT reporting %ld pages even though we drained it!\n", nnew);
-      return -1;
-    }
-
-    if (!pfa_is_evictqueue_empty()) {
-      printk("waiting for evict queue to be empty\n");
-      if (!pfa_poll_evict())
-        printk("error polling for eviction\n");
-    }
-
-    flush_tlb();
-    return 0;
   }
 
-  if (pte == 0 || *pte == 0 || !__valid_user_range(vaddr, 1))
+  if (pte == 0 || *pte == 0 || !__valid_user_range(vaddr, 1)) {
     return -1;
-  else if (!(*pte & PTE_V))
-  {
+  } else if (!(*pte & PTE_V)) {
     uintptr_t ppn = vpn + (first_free_paddr / RISCV_PGSIZE);
 
     vmr_t* v = (vmr_t*)*pte;

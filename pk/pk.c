@@ -336,12 +336,14 @@ bool test_max(void)
 #define PTRS_PER_PAGE (RISCV_PGSIZE / sizeof(void*))
 bool test_n(int n) {
   printk("Test_%d\n", n);
+  current_exp = PFA_EXP_TESTN;
   void **pages = (void**)page_alloc();
 
-  int nleft = n;
-  while(nleft) {
+  /* int nleft = n; */
+  test_n_nrem = n;
+  while(test_n_nrem) {
     /* How many to do this iteration */
-    int local_n = MIN(n, PTRS_PER_PAGE);
+    int local_n = MIN(test_n_nrem, PTRS_PER_PAGE);
 
     /* Allocate and evict a bunch of pages.
      * Note: We'll never get the paddr or vaddr back after this */
@@ -360,9 +362,10 @@ bool test_n(int n) {
         printk("Unexpected value in page %d: %d\n", i, *(uint8_t*)pages[i]);
         return false;
       }
+      /* This global is used by the pf handler, it must be decremented here
+       * so that it reflects the number of un-faulted pages */
+      test_n_nrem--;
     }
-
-    nleft -= local_n;
   }
 
   /* Finish draining the new page queue in case the page fault handler didn't
@@ -370,9 +373,10 @@ bool test_n(int n) {
    * tests*/
   pfa_drain_newq();
 
-  /* check_pfa_clean(); */
+  check_pfa_clean();
 
   printk("Test_%d Success\n", n);
+  current_exp = PFA_EXP_OTHER;
   return true;
 }
 
@@ -627,6 +631,143 @@ bool test_interleaved_newq()
   return true;
 }
 
+/* bool test_n(int n) */
+/* { */
+/*   printk("test_%d\n", n); */
+/*    */
+/*   test_n_nrem = n; */
+/*   while(test_n_nrem > 0) */
+/*   { */
+/*     for(int i = 0; i < PFA_NEW_MAX; i++) */
+/*     { */
+/*       evict_full_rem_pg(&exp_pgs[i]); */
+/*     } */
+/*  */
+/*     for(int i = 0 */
+/*  */
+/*  */
+/* } */
+bool test_interleaved_newq_fault(void)
+{
+  printk("test_interleaved_newq_fault\n");
+  rem_pg_t pgs[PFA_NEW_MAX];
+  rem_pg_t faulting_pg;
+
+  printk("Testing new_vaddr popped before fault:\n");
+
+  alloc_rem_pg(&faulting_pg);
+
+  current_exp = PFA_EXP_NEWVADDR_FAULT;
+  test_vaddr = 0;
+  test_pgid = 0;
+  for(int i = 0; i < PFA_NEW_MAX; i++)
+  {
+    alloc_rem_pg(&pgs[i]);
+    evict_full_rem_pg(&pgs[i]);
+    fetch_rem_pg(&pgs[i]);
+  }
+
+  /* The newqs are now full, next access will fault */
+  evict_full_rem_pg(&faulting_pg);
+
+  test_vaddr = *PFA_NEWVADDR;
+  assert(test_vaddr == pgs[0].vaddr);
+  
+  /* Page fault hander should be triggered by this fetch and drain the new_pgid */
+  fetch_rem_pg(&faulting_pg);
+  assert(test_pgid == pgs[0].pgid);
+
+  test_pgid = 0;
+  test_vaddr = 0;
+
+  /* Everything should be back to normal with pgs[1:MAX] and faulting_pg in the newqs */
+  for(int i = 1; i < PFA_NEW_MAX; i++) {
+    pop_new_rem_pg(&pgs[i]);
+  }
+  pop_new_rem_pg(&faulting_pg);
+  
+  check_pfa_clean();
+  
+  printk("new_vaddr popped first success\n");
+  printk("Testing new_pgid popped before fault:\n");
+
+  test_pgid = 0;
+  test_vaddr = 0;
+  current_exp = PFA_EXP_NEWPGID_FAULT;
+
+  for(int i = 0; i < PFA_NEW_MAX; i++)
+  {
+    evict_full_rem_pg(&pgs[i]);
+    fetch_rem_pg(&pgs[i]);
+  }
+  
+  /* The newqs are now full, next access will fault */
+  evict_full_rem_pg(&faulting_pg);
+
+  test_pgid = *PFA_NEWPGID;
+  assert(test_pgid == pgs[0].pgid);
+  
+  /* Page fault hander should be triggered by this fetch and drain the new_pgid */
+  fetch_rem_pg(&faulting_pg);
+  assert(test_vaddr == pgs[0].vaddr);
+
+  test_pgid = 0;
+  test_vaddr = 0;
+
+  /* Everything should be back to normal with pgs[1:MAX] and faulting_pg in the newqs */
+  for(int i = 1; i < PFA_NEW_MAX; i++) {
+    pop_new_rem_pg(&pgs[i]);
+  }
+  pop_new_rem_pg(&faulting_pg);
+  
+  check_pfa_clean();
+ 
+  current_exp = PFA_EXP_OTHER;
+  printk("new_pgid popped first success\n");
+  return true;
+}
+  
+/* This test behaves similarly to emulation mode in linux, we mark a page remote
+ * without actually evicting anything, and leave all the queues empty */
+bool test_emptyq(void)
+{
+  rem_pg_t pg;
+
+  printk("test_empty_q\n");
+
+  /* Paranoia, this test requires that the queues all be empty */
+  check_pfa_clean();
+  test_paddr = 0;
+  test_vaddr = 0;
+
+  current_exp = PFA_EXP_EMPTYQ;
+
+  alloc_rem_pg(&pg);
+
+  /* This is an illegal pgid, it definitely doesn't exist on the memblade */
+  pgid_t pgid = PFA_INIT_RPN - 1;
+
+  /* Make a remote pte without actually evicting */
+  pte_t *page_pte = walk(pg.vaddr);
+  *page_pte = pfa_mk_remote_pte(pgid, *page_pte);
+  flush_tlb();
+
+  /* page fault handler uses these */
+  test_paddr = pg.paddr;
+  test_vaddr = pg.vaddr;
+
+  /* trigger a fault on this fake remote page. The handler has special code
+   * here to fixup the pte. */
+  fetch_rem_pg(&pg);
+  test_paddr = 0;
+  test_vaddr = 0;
+
+  check_pfa_clean();
+
+  printk("test_empty_q success\n");
+  return true;
+}
+
 int main()
 {
   pfa_init();
@@ -680,6 +821,17 @@ int main()
     printk("Test Failure!\n");
     return EXIT_FAILURE;
   }
+
+  if(!test_interleaved_newq_fault()) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
+  if(!test_emptyq()) {
+    printk("Test Failure!\n");
+    return EXIT_FAILURE;
+  }
+
 
   if(!test_n(32)) { // takes about 2m cycles
     printk("Test Failure!\n");

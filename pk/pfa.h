@@ -44,6 +44,14 @@
  * broken if you have to poll this many times. Currently very conservative. */
 #define MAX_POLL_ITER 1024*1024
 
+typedef enum {
+  PFA_EXP_NEWVADDR_FAULT, /* test_interleaved_newq_fault */
+  PFA_EXP_NEWPGID_FAULT, /* test_interleaved_newq_fault */
+  PFA_EXP_TESTN, /* test_n */
+  PFA_EXP_EMPTYQ, /* test_emptyq */
+  PFA_EXP_OTHER /* All other experiments that don't need special handling */
+} pfa_exp_t;
+
 /* Page ID */
 typedef uint64_t pgid_t;
 #define PFA_INIT_RPN 4 //Remote page numbers will start at this value and go up
@@ -62,6 +70,20 @@ typedef struct rem_pg {
 
   pgid_t pgid;
 } rem_pg_t;
+
+/* ==============
+ * Globals (defined in pfa.c)
+ * ==============
+ */
+extern pfa_exp_t current_exp;
+
+/* Globals used by test_n */
+extern int64_t test_n_nrem;
+
+/* Globals used by test_interleaved_newq_fault and test_emptyq */
+extern volatile pgid_t test_pgid;
+extern volatile uint64_t test_vaddr;
+extern uint64_t test_paddr;
 
 /* Turn a regular pte into a remote pte with page_id */
 pte_t pfa_mk_remote_pte(pgid_t page_id, pte_t orig_pte);

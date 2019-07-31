@@ -2,6 +2,13 @@
 #include "nic.h"
 #include "frontend.h"
 
+/* Globals, see pfa.h for details */
+pfa_exp_t current_exp = PFA_EXP_OTHER;
+int64_t test_n_nrem = 0;
+volatile pgid_t test_pgid = 0;
+volatile uint64_t test_vaddr = 0;
+uint64_t test_paddr = 0;
+
 void pfa_init()
 {
   printk("Initializing PFA\n");
@@ -15,6 +22,7 @@ void pfa_init()
   uint64_t dst_mac = mac + (1L << 40);
   printk("setting mac in PFA to: %ld\n", dst_mac);
   *PFA_DSTMAC = dst_mac;
+
   return;
 }
 
