@@ -18,7 +18,7 @@
 #define PFA_DSTMAC         ((volatile uint64_t*)(PFA_BASE + 56))
 
 /* PFA Limits (implementation-specific) */
-#define PFA_QUEUES_SIZE 64 
+#define PFA_QUEUES_SIZE 256
 #define PFA_FREE_MAX (PFA_QUEUES_SIZE)
 #define PFA_NEW_MAX  (PFA_QUEUES_SIZE)
 #define PFA_EVICT_MAX (PFA_QUEUES_SIZE)

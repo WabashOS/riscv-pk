@@ -631,101 +631,85 @@ bool test_interleaved_newq()
   return true;
 }
 
-/* bool test_n(int n) */
+/* bool test_interleaved_newq_fault(void) */
 /* { */
-/*   printk("test_%d\n", n); */
-/*    */
-/*   test_n_nrem = n; */
-/*   while(test_n_nrem > 0) */
+/*   #<{(| printk("test_interleaved_newq_fault\n"); |)}># */
+/*   rem_pg_t pgs[PFA_NEW_MAX]; */
+/*   rem_pg_t faulting_pg; */
+/*  */
+/*   printk("Testing new_vaddr popped before fault:\n"); */
+/*  */
+/*   alloc_rem_pg(&faulting_pg); */
+/*  */
+/*   current_exp = PFA_EXP_NEWVADDR_FAULT; */
+/*   test_vaddr = 0; */
+/*   test_pgid = 0; */
+/*   for(int i = 0; i < PFA_NEW_MAX; i++) */
 /*   { */
-/*     for(int i = 0; i < PFA_NEW_MAX; i++) */
-/*     { */
-/*       evict_full_rem_pg(&exp_pgs[i]); */
-/*     } */
+/*     alloc_rem_pg(&pgs[i]); */
+/*     evict_full_rem_pg(&pgs[i]); */
+/*     fetch_rem_pg(&pgs[i]); */
+/*   } */
 /*  */
-/*     for(int i = 0 */
+/*   #<{(| The newqs are now full, next access will fault |)}># */
+/*   evict_full_rem_pg(&faulting_pg); */
 /*  */
+/*   test_vaddr = *PFA_NEWVADDR; */
+/*   assert(test_vaddr == pgs[0].vaddr); */
 /*  */
+/*   #<{(| Page fault hander should be triggered by this fetch and drain the new_pgid |)}># */
+/*   fetch_rem_pg(&faulting_pg); */
+/*   assert(test_pgid == pgs[0].pgid); */
+/*  */
+/*   test_pgid = 0; */
+/*   test_vaddr = 0; */
+/*  */
+/*   #<{(| Everything should be back to normal with pgs[1:MAX] and faulting_pg in the newqs |)}># */
+/*   for(int i = 1; i < PFA_NEW_MAX; i++) { */
+/*     pop_new_rem_pg(&pgs[i]); */
+/*   } */
+/*   pop_new_rem_pg(&faulting_pg); */
+/*    */
+/*   check_pfa_clean(); */
+/*    */
+/*   printk("new_vaddr popped first success\n"); */
+/*   printk("Testing new_pgid popped before fault:\n"); */
+/*  */
+/*   test_pgid = 0; */
+/*   test_vaddr = 0; */
+/*   current_exp = PFA_EXP_NEWPGID_FAULT; */
+/*  */
+/*   for(int i = 0; i < PFA_NEW_MAX; i++) */
+/*   { */
+/*     evict_full_rem_pg(&pgs[i]); */
+/*     fetch_rem_pg(&pgs[i]); */
+/*   } */
+/*    */
+/*   #<{(| The newqs are now full, next access will fault |)}># */
+/*   evict_full_rem_pg(&faulting_pg); */
+/*  */
+/*   test_pgid = *PFA_NEWPGID; */
+/*   assert(test_pgid == pgs[0].pgid); */
+/*    */
+/*   #<{(| Page fault hander should be triggered by this fetch and drain the new_pgid |)}># */
+/*   fetch_rem_pg(&faulting_pg); */
+/*   assert(test_vaddr == pgs[0].vaddr); */
+/*  */
+/*   test_pgid = 0; */
+/*   test_vaddr = 0; */
+/*  */
+/*   #<{(| Everything should be back to normal with pgs[1:MAX] and faulting_pg in the newqs |)}># */
+/*   for(int i = 1; i < PFA_NEW_MAX; i++) { */
+/*     pop_new_rem_pg(&pgs[i]); */
+/*   } */
+/*   pop_new_rem_pg(&faulting_pg); */
+/*    */
+/*   check_pfa_clean(); */
+/*   */
+/*   current_exp = PFA_EXP_OTHER; */
+/*   printk("new_pgid popped first success\n"); */
+/*   return true; */
 /* } */
-bool test_interleaved_newq_fault(void)
-{
-  printk("test_interleaved_newq_fault\n");
-  rem_pg_t pgs[PFA_NEW_MAX];
-  rem_pg_t faulting_pg;
-
-  printk("Testing new_vaddr popped before fault:\n");
-
-  alloc_rem_pg(&faulting_pg);
-
-  current_exp = PFA_EXP_NEWVADDR_FAULT;
-  test_vaddr = 0;
-  test_pgid = 0;
-  for(int i = 0; i < PFA_NEW_MAX; i++)
-  {
-    alloc_rem_pg(&pgs[i]);
-    evict_full_rem_pg(&pgs[i]);
-    fetch_rem_pg(&pgs[i]);
-  }
-
-  /* The newqs are now full, next access will fault */
-  evict_full_rem_pg(&faulting_pg);
-
-  test_vaddr = *PFA_NEWVADDR;
-  assert(test_vaddr == pgs[0].vaddr);
-  
-  /* Page fault hander should be triggered by this fetch and drain the new_pgid */
-  fetch_rem_pg(&faulting_pg);
-  assert(test_pgid == pgs[0].pgid);
-
-  test_pgid = 0;
-  test_vaddr = 0;
-
-  /* Everything should be back to normal with pgs[1:MAX] and faulting_pg in the newqs */
-  for(int i = 1; i < PFA_NEW_MAX; i++) {
-    pop_new_rem_pg(&pgs[i]);
-  }
-  pop_new_rem_pg(&faulting_pg);
-  
-  check_pfa_clean();
-  
-  printk("new_vaddr popped first success\n");
-  printk("Testing new_pgid popped before fault:\n");
-
-  test_pgid = 0;
-  test_vaddr = 0;
-  current_exp = PFA_EXP_NEWPGID_FAULT;
-
-  for(int i = 0; i < PFA_NEW_MAX; i++)
-  {
-    evict_full_rem_pg(&pgs[i]);
-    fetch_rem_pg(&pgs[i]);
-  }
-  
-  /* The newqs are now full, next access will fault */
-  evict_full_rem_pg(&faulting_pg);
-
-  test_pgid = *PFA_NEWPGID;
-  assert(test_pgid == pgs[0].pgid);
-  
-  /* Page fault hander should be triggered by this fetch and drain the new_pgid */
-  fetch_rem_pg(&faulting_pg);
-  assert(test_vaddr == pgs[0].vaddr);
-
-  test_pgid = 0;
-  test_vaddr = 0;
-
-  /* Everything should be back to normal with pgs[1:MAX] and faulting_pg in the newqs */
-  for(int i = 1; i < PFA_NEW_MAX; i++) {
-    pop_new_rem_pg(&pgs[i]);
-  }
-  pop_new_rem_pg(&faulting_pg);
-  
-  check_pfa_clean();
- 
-  current_exp = PFA_EXP_OTHER;
-  printk("new_pgid popped first success\n");
-  return true;
-}
   
 /* This test behaves similarly to emulation mode in linux, we mark a page remote
  * without actually evicting anything, and leave all the queues empty */
@@ -822,10 +806,10 @@ int main()
     return EXIT_FAILURE;
   }
 
-  if(!test_interleaved_newq_fault()) {
-    printk("Test Failure!\n");
-    return EXIT_FAILURE;
-  }
+  /* if(!test_interleaved_newq_fault()) { */
+  /*   printk("Test Failure!\n"); */
+  /*   return EXIT_FAILURE; */
+  /* } */
 
   if(!test_emptyq()) {
     printk("Test Failure!\n");
